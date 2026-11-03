@@ -1,0 +1,84 @@
+import { ChevronDown, CircleDollarSign, ClipboardList, CreditCard, LayoutDashboard, Package, Settings, Sparkles, Store, Users, X } from 'lucide-react'
+
+import type { Section } from './types'
+import { nav } from './data'
+
+const iconMap = {
+  Overview: LayoutDashboard,
+  Stocks: Package,
+  'New Stocks': ClipboardList,
+  Debt: CreditCard,
+  Paid: CircleDollarSign,
+  Settings: Settings,
+  'Team members': Users,
+} as const
+
+export function Sidebar({
+  section,
+  sidebar,
+  settings,
+  onGo,
+  onClose,
+}: {
+  section: Section
+  sidebar: boolean
+  settings: { workspace: string }
+  onGo: (section: Section) => void
+  onClose?: () => void
+}) {
+  return (
+    <aside className={`sidebar ${sidebar ? '' : 'sidebar-collapsed'}`}>
+      <a href="/">
+      <div className="brand">
+        <div className="brand-mark"><Store /></div>
+        {sidebar && <><strong>electric-house</strong><span className="brand-dot" /></>}
+        <button className="close-button md:hidden" onClick={onClose} aria-label="Close">
+          <X />
+        </button>
+      </div>
+      </a>
+
+      <div className="workspace">
+        <div className="avatar">AM</div>
+        {sidebar && <div><b>{settings.workspace}</b><small>Workspace</small></div>}
+        <ChevronDown className="workspace-chevron" />
+      </div>
+
+      <p className="nav-label">Workspace</p>
+      <nav>
+        {nav.map(({ label }) => {
+          const Icon = iconMap[label as keyof typeof iconMap] || LayoutDashboard
+          return (
+            <button key={label} className={section === label ? 'nav-item active' : 'nav-item'} onClick={() => onGo(label as Section)} title={!sidebar ? label : undefined}>
+              <Icon />
+              <span className="nav-label-text">{label}</span>
+              {label === 'New Stocks' }
+            </button>
+          )
+        })}
+      </nav>
+
+      <div className="sidebar-bottom">
+        <p className="nav-label">Manage</p>
+        <button className={`nav-item ${section === 'Settings' ? 'active' : ''}`} onClick={() => onGo('Settings')}>
+          <Settings />
+          {sidebar && <span>Settings</span>}
+        </button>
+        <button className={`nav-item ${section === 'Team members' ? 'active' : ''}`} onClick={() => onGo('Team members')}>
+          <Users />
+          {sidebar && <span>Team members</span>}
+        </button>
+
+        <div className="help-card">
+          {sidebar && <>
+            <Sparkles />
+            <div>
+              <b>Need a hand?</b>
+              <small>Contact your admin</small>
+            </div>
+          </>}
+        </div>
+      </div>
+    </aside>
+  )
+}

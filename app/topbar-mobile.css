@@ -1,0 +1,33 @@
+/* Topbar adjustments for mobile: show only brand + hamburger */
+.topbar{height:72px;display:flex;align-items:center;gap:18px;padding:0 34px;border-bottom:1px solid var(--line);}
+.topbar-left{display:flex;align-items:center;gap:12px;}
+.topbar .topbar-brand{display:flex;align-items:center;gap:8px;font-weight:700}
+.topbar .topbar-brand svg{width:20px;height:20px}
+.top-actions .hamburger-mobile{display:none}
+
+@media (max-width: 768px){
+  .topbar{padding:0 12px;height:56px}
+  .breadcrumbs{display:none}
+  .top-actions > *{display:none}
+  .topbar .topbar-brand{display:flex}
+  .top-actions .hamburger-mobile{display:inline-flex}
+}
+
+/* Sidebar overlay behaviour on small screens */
+@media (max-width: 768px){
+  .sidebar{position:fixed;right:0;top:0;bottom:0;height:60vh;z-index:60;transform:translateX(100%);transition:transform .25s ease,box-shadow .25s ease;width:min(320px,85%);border-left:1px solid var(--line);overflow:auto}
+  .sidebar:not(.sidebar-collapsed){transform:translateX(0);box-shadow:0 40px 80px rgba(0,0,0,0.35)}
+  .app-shell .main-content{margin-left:0}
+
+  .sidebar .close-button{display:block;margin-left:auto;background:transparent;border:0;padding:8px;margin-top:-6px}
+  .sidebar .close-button svg{width:18px;height:18px}
+  /* hide the default brand text when collapsed to keep header minimal */
+  .sidebar.sidebar-collapsed .brand strong{display:none}
+
+  /* Ensure nav items show icon on left with title beside it on mobile */
+  .sidebar nav .nav-item{justify-content:flex-start;padding:12px 14px}
+  .sidebar nav .nav-item svg{margin-right:12px}
+  /* hide label text when sidebar is collapsed (desktop compact mode) */
+  .sidebar.sidebar-collapsed .nav-item .nav-label-text{display:none}
+  .sidebar.sidebar-collapsed .nav-item .nav-count{display:none}
+}
