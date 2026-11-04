@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Cloud, HardDrive, RefreshCw, Search, ShieldCheck, Wifi, WifiOff } from 'lucide-react'
-import { listQueuedOperations, markLocalRecordSynchronized, updateQueuedOperation, writeLocalRecord, type QueuedOperation } from '@/lib/offline-queue'
+import { isMicomercSyncTarget, listQueuedOperations, markLocalRecordSynchronized, updateQueuedOperation, writeLocalRecord, type QueuedOperation } from '@/lib/offline-queue'
 import { money } from '../utils'
 
 type RecordValue = Record<string, unknown>
@@ -221,6 +221,13 @@ export function SyncCenter({ currency }: { currency: string }) {
     const done = new Set(operations.filter((item) => item.status === 'synchronized').map((item) => item.id))
     for (let index = 0; index < pending.length; index++) {
       const operation = pending[index]
+      if (!isMicomercSyncTarget(operation.target, operation.method)) {
+        const error = 'Blocked: this operation does not target a Micomerc API endpoint. It was preserved for review.'
+        await updateQueuedOperation({ ...operation, status: 'failed', error })
+        outcomes.push({ id: operation.id, ok: false, message: error })
+        setResults([...outcomes])
+        continue
+      }
       const dependencies = operation.dependsOn ? Array.isArray(operation.dependsOn) ? operation.dependsOn : [operation.dependsOn] : []
       if (dependencies.some((dependency) => !done.has(dependency))) {
         const dependencyError = 'Waiting for a required earlier operation. Resolve or retry that operation first.'

@@ -23,9 +23,12 @@ const delay = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 async function connectWithRetry(): Promise<MongoClient> {
-  const uri = process.env.MONGODB_URI;
+  const uri = process.env.MICOMERC_MONGODB_URI;
   if (!uri) {
-    throw new Error("Please define MONGODB_URI in your .env file");
+    throw new Error("Please define MICOMERC_MONGODB_URI for the Micomerc database");
+  }
+  if (!uri.startsWith("mongodb://") && !uri.startsWith("mongodb+srv://")) {
+    throw new Error("MICOMERC_MONGODB_URI must be a valid MongoDB connection string");
   }
 
   let lastError: unknown;

@@ -30,6 +30,28 @@ export type CachedRecord = {
 const DB_NAME = 'micomerc-offline-v1'
 const STORE = 'operations'
 const RECORDS = 'records'
+const SYNC_TARGETS: Record<string, { collection: string[]; item: string[] }> = {
+  activities: { collection: ['POST'], item: ['PATCH'] },
+  branches: { collection: ['POST'], item: ['PATCH'] },
+  'company-returns': { collection: ['POST'], item: ['PATCH'] },
+  debts: { collection: ['POST'], item: ['PATCH', 'DELETE'] },
+  'pending-orders': { collection: ['POST', 'PATCH'], item: [] },
+  products: { collection: ['POST'], item: ['PATCH', 'DELETE'] },
+  receipts: { collection: ['POST'], item: ['PATCH', 'DELETE'] },
+  returns: { collection: ['POST'], item: ['PATCH'] },
+  sales: { collection: ['POST'], item: [] },
+  settings: { collection: ['PATCH'], item: [] },
+  store: { collection: ['POST'], item: ['PATCH'] },
+  transfers: { collection: ['POST'], item: ['PATCH'] },
+}
+
+export function isMicomercSyncTarget(target: string, method: QueuedOperation['method']): boolean {
+  const match = /^\/api\/([a-z-]+)(?:\/([A-Za-z0-9_-]+))?$/.exec(target)
+  if (!match) return false
+  const [, collection, id] = match
+  const allowed = SYNC_TARGETS[collection]
+  return Boolean(allowed && (id ? allowed.item : allowed.collection).includes(method))
+}
 
 /** Connectivity hint only: callers must still handle fetch failures when it returns true. */
 export function shouldAttemptServerRequest(): boolean {
@@ -217,6 +239,9 @@ export async function saveLocalDeletionAndOperation(
   id: string | number,
   operation: Omit<QueuedOperation, 'id' | 'createdAt' | 'status'> & { id?: string },
 ): Promise<QueuedOperation> {
+  if (!isMicomercSyncTarget(operation.target, operation.method)) {
+    throw new Error('Offline operation target must be a Micomerc API endpoint.')
+  }
   const operationValue: QueuedOperation = { ...operation, id: operation.id ?? crypto.randomUUID(), createdAt: new Date().toISOString(), status: 'pending' }
   const db = await openDatabase()
   await new Promise<void>((resolve, reject) => {
@@ -250,7 +275,7 @@ export async function saveLocalRecordsAndOperation(
   operation: Omit<QueuedOperation, 'id' | 'createdAt' | 'status'> & { id?: string },
 ): Promise<QueuedOperation> {
   const operationValue: QueuedOperation = { ...operation, id: operation.id ?? crypto.randomUUID(), createdAt: new Date().toISOString(), status: 'pending' }
-  if (!operationValue.id.trim() || !operationValue.type.trim() || !operationValue.target.trim() || !operationValue.payload || typeof operationValue.payload !== 'object' || !Array.isArray(values) || values.some((record) => !record || typeof record.collection !== 'string' || !record.collection.trim() || (typeof record.id === 'number' && !Number.isSafeInteger(record.id)) || (typeof record.id === 'string' && !record.id.trim()) || (typeof record.id !== 'number' && typeof record.id !== 'string'))) {
+  if (!operationValue.id.trim() || !operationValue.type.trim() || !isMicomercSyncTarget(operationValue.target, operationValue.method) || !operationValue.payload || typeof operationValue.payload !== 'object' || !Array.isArray(values) || values.some((record) => !record || typeof record.collection !== 'string' || !record.collection.trim() || (typeof record.id === 'number' && !Number.isSafeInteger(record.id)) || (typeof record.id === 'string' && !record.id.trim()) || (typeof record.id !== 'number' && typeof record.id !== 'string'))) {
     throw new Error('Offline record details are invalid; nothing was saved.')
   }
   const db = await openDatabase()
@@ -301,6 +326,9 @@ export async function saveOfflineSaleAndOperation<T extends { id: string }>(
   lowStockThreshold: number,
 ): Promise<Array<Record<string, unknown>>> {
   const operationValue: QueuedOperation = { ...operation, id: operation.id ?? crypto.randomUUID(), createdAt: new Date().toISOString(), status: 'pending', recordCollection: 'sales', recordId: sale.id }
+  if (!isMicomercSyncTarget(operationValue.target, operationValue.method)) {
+    throw new Error('Offline sale target must be a Micomerc API endpoint.')
+  }
   const db = await openDatabase()
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([RECORDS, STORE], 'readwrite')
@@ -356,6 +384,9 @@ export async function savePendingOrderAndOperation<T extends { id: string; items
   sale?: { id: string },
 ): Promise<Array<Record<string, unknown>>> {
   const operationValue: QueuedOperation = { ...operation, id: operation.id ?? crypto.randomUUID(), createdAt: new Date().toISOString(), status: 'pending', recordCollection: 'pendingOrders', recordId: order.id }
+  if (!isMicomercSyncTarget(operationValue.target, operationValue.method)) {
+    throw new Error('Offline order target must be a Micomerc API endpoint.')
+  }
   const db = await openDatabase()
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([RECORDS, STORE], 'readwrite')
@@ -484,6 +515,9 @@ export function findInventoryDependencies(operations: QueuedOperation[], product
 }
 
 export async function saveQueuedOperation(operation: Omit<QueuedOperation, 'id' | 'createdAt' | 'status'> & { id?: string }): Promise<QueuedOperation> {
+  if (!isMicomercSyncTarget(operation.target, operation.method)) {
+    throw new Error('Offline operation target must be a Micomerc API endpoint.')
+  }
   const value: QueuedOperation = { ...operation, id: operation.id ?? crypto.randomUUID(), createdAt: new Date().toISOString(), status: 'pending' }
   const db = await openDatabase()
   return new Promise((resolve, reject) => {
