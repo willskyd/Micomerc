@@ -479,7 +479,7 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
   min-width: 0;
   scrollbar-color: color-mix(in srgb, var(--muted) 55%, transparent) transparent;
   scrollbar-width: thin;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 .record-list-scroll::-webkit-scrollbar,
 .sync-review-list::-webkit-scrollbar,
