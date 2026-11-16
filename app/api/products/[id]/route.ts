@@ -46,6 +46,7 @@ export async function PATCH(
       "category",
       "stock",
       "price",
+      "costPrice",
       "status",
     ];
 
@@ -54,6 +55,24 @@ export async function PATCH(
     for (const field of allowedFields) {
       if (body[field] !== undefined) {
         updates[field] = body[field];
+      }
+    }
+
+    let unsetCostPrice = false;
+    if ("costPrice" in updates) {
+      const rawCostPrice = updates.costPrice;
+      if (rawCostPrice === null || rawCostPrice === "") {
+        updates.costPrice = null;
+        unsetCostPrice = true;
+      } else {
+        if (typeof rawCostPrice !== "number" && typeof rawCostPrice !== "string") {
+          return NextResponse.json({ message: "Cost price must be a non-negative number" }, { status: 400 });
+        }
+        const costPrice = Number(rawCostPrice);
+        if (!Number.isFinite(costPrice) || costPrice < 0) {
+          return NextResponse.json({ message: "Cost price must be a non-negative number" }, { status: 400 });
+        }
+        updates.costPrice = costPrice;
       }
     }
 
@@ -140,12 +159,22 @@ export async function PATCH(
     }
 
     const filter: Record<string, unknown> = { id: productId };
-    let update: Record<string, unknown> = { $set: updates };
+    const setUpdates = { ...updates };
+    if (unsetCostPrice) delete setUpdates.costPrice;
+
+    const update: Record<string, unknown> = {};
     if (operationId) {
       const revision = Number.isSafeInteger(existing.revision) ? existing.revision : 0;
       filter.revision = existing.revision ?? { $exists: false };
       filter.appliedOperations = { $not: { $elemMatch: { id: operationId } } };
-      update = { $set: { ...updates, revision: revision + 1 }, $push: { appliedOperations: { id: operationId, hash: requestHash } } };
+      update.$set = { ...setUpdates, revision: revision + 1 };
+      update.$push = { appliedOperations: { id: operationId, hash: requestHash } };
+    } else if (Object.keys(setUpdates).length > 0) {
+      update.$set = setUpdates;
+    }
+
+    if (unsetCostPrice) {
+      update.$unset = { costPrice: "" };
     }
     const result = await collection.updateOne(filter, update as any);
 

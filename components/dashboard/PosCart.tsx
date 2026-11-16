@@ -8,10 +8,10 @@ import type { PendingOrder, Product, Sale } from './types'
 import { money } from './utils'
 import { listQueuedOperations, readLocalCollection, saveOfflineSaleAndOperation, savePendingOrderAndOperation, shouldAttemptServerRequest, shouldQueueAfterServerFailure, writeLocalRecord } from '@/lib/offline-queue'
 
-type CartLine = { product: Product; quantity: number }
+type CartLine = { product: Product; quantity: number; unitPriceMinor: number }
 type PendingCheckout = {
   idempotencyKey: string
-  items: { productId: number; quantity: number }[]
+  items: { productId: number; quantity: number; unitPriceMinor: number }[]
   cashTendered: number
 }
 type PrintRequest = { sale: Sale; token: number }
@@ -75,6 +75,21 @@ function isSalesPage(value: unknown): value is SalesPage {
 }
 
 type SalesPreset = 'today' | 'custom'
+type UnitsReportItem = { productId: number; name: string; quantitySold: number }
+type UnitsReportData = { items: UnitsReportItem[]; totalUnits: number; productCount: number }
+const EMPTY_UNITS_REPORT: UnitsReportData = { items: [], totalUnits: 0, productCount: 0 }
+
+function isUnitsReportData(value: unknown): value is UnitsReportData {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const data = value as Record<string, unknown>
+  return Array.isArray(data.items) &&
+    data.items.every((item) => !!item && typeof item === 'object' &&
+      typeof (item as UnitsReportItem).productId === 'number' &&
+      typeof (item as UnitsReportItem).name === 'string' &&
+      typeof (item as UnitsReportItem).quantitySold === 'number') &&
+    typeof data.totalUnits === 'number' &&
+    typeof data.productCount === 'number'
+}
 type SummaryPreset =
   | 'today'
   | 'yesterday'
@@ -88,7 +103,7 @@ function localMidnight(value: Date) {
 }
 
 function parseSalesDate(value: string): Date | undefined {
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return undefined
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined
   const [year, month, day] = value.split('-').map(Number)
   const date = new Date(year, month - 1, day)
   return date.getFullYear() === year &&
@@ -213,6 +228,7 @@ export function PosCart({
   const [cart, setCart] = useState<CartLine[]>([])
   const cartRef = useRef<CartLine[]>([])
   const [quantityDrafts, setQuantityDrafts] = useState<Record<number, string>>({})
+  const [unitPriceDrafts, setUnitPriceDrafts] = useState<Record<number, string>>({})
   const [barcode, setBarcode] = useState('')
   const [query, setQuery] = useState('')
   const [message, setMessage] = useState('')
@@ -235,6 +251,17 @@ export function PosCart({
   const [salesPreset, setSalesPreset] = useState<SalesPreset>('today')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
+  const [unitsPreset, setUnitsPreset] = useState<SalesPreset>('today')
+  const [unitsFrom, setUnitsFrom] = useState('')
+  const [unitsTo, setUnitsTo] = useState('')
+  const [unitsQuery, setUnitsQuery] = useState('')
+  const [unitsReport, setUnitsReport] = useState<UnitsReportData>(EMPTY_UNITS_REPORT)
+  const [unitsLoading, setUnitsLoading] = useState(false)
+  const [unitsError, setUnitsError] = useState('')
+  const [unitsPrinting, setUnitsPrinting] = useState(false)
+  const [unitsPrintError, setUnitsPrintError] = useState('')
+  const [unitsPrintStatus, setUnitsPrintStatus] = useState('')
+  const unitsPrintLock = useRef(false)
   const [summaryPreset, setSummaryPreset] = useState<SummaryPreset>('today')
   const [summaryCustomFrom, setSummaryCustomFrom] = useState('')
   const [summaryCustomTo, setSummaryCustomTo] = useState('')
@@ -295,10 +322,10 @@ export function PosCart({
     ).slice(0, 8)
   }, [products, query])
 
-  const subtotalMinor = cart.reduce((sum, line) => {
-    const unitPriceMinor = Math.round(line.product.price * 100)
-    return sum + Math.round(unitPriceMinor * line.quantity)
-  }, 0)
+  const subtotalMinor = cart.reduce(
+    (sum, line) => sum + Math.round(line.unitPriceMinor * line.quantity),
+    0
+  )
   const itemCount = cart.reduce((sum, line) => sum + line.quantity, 0)
   const pending = pendingCheckout !== null
   const cartLocked = pending || checkoutLoading
@@ -306,6 +333,10 @@ export function PosCart({
   const summaryRange = useMemo(
     () => summarySalesRange(summaryPreset, summaryCustomFrom, summaryCustomTo),
     [summaryPreset, summaryCustomFrom, summaryCustomTo]
+  )
+  const unitsRange = useMemo(
+    () => salesRange(unitsPreset, unitsFrom, unitsTo),
+    [unitsPreset, unitsFrom, unitsTo]
   )
   const normalizedReceiptQuery = recentQuery.trim().toLocaleLowerCase()
   const isSaleInSelectedRange = (sale: Sale) => {
@@ -325,6 +356,10 @@ export function PosCart({
     ? archiveSales.filter((sale) => !recentSaleIds.has(sale.id) && isSaleInSelectedRange(sale))
     : []
   const visibleReceipts = [...matchingRecentSales, ...visibleArchiveSales]
+  const filteredUnits = useMemo(() => {
+    const search = unitsQuery.trim().toLocaleLowerCase()
+    return unitsReport.items.filter((item) => !search || item.name.toLocaleLowerCase().includes(search))
+  }, [unitsReport.items, unitsQuery])
 
   useEffect(() => {
     if (!active) return
@@ -344,6 +379,51 @@ export function PosCart({
       .finally(() => { if (!cancelled) setPeriodLoading(false) })
     return () => { cancelled = true }
   }, [active, summaryRange, salesRefresh])
+
+  useEffect(() => {
+    if (!active) return
+    if (!unitsRange?.from || !unitsRange.to) {
+      setUnitsReport(EMPTY_UNITS_REPORT)
+      setUnitsLoading(false)
+      setUnitsError(unitsPreset === 'custom' ? 'Choose both dates for the custom range.' : 'Choose a valid date range.')
+      return
+    }
+
+    const controller = new AbortController()
+    const params = new URLSearchParams({
+      from: unitsRange.from.toISOString(),
+      to: unitsRange.to.toISOString(),
+    })
+
+    setUnitsLoading(true)
+    setUnitsError('')
+    fetch(`/api/sales/units?${params.toString()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const result: unknown = await response.json().catch(() => null)
+        if (!response.ok || !isUnitsReportData(result)) {
+          throw new Error(
+            typeof result === 'object' && result !== null && 'message' in result && typeof result.message === 'string'
+              ? result.message
+              : 'Units sold report is unavailable'
+          )
+        }
+        setUnitsReport(result)
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setUnitsReport(EMPTY_UNITS_REPORT)
+          setUnitsError(error instanceof Error ? error.message : 'Units sold report is unavailable')
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setUnitsLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [active, unitsRange, unitsPreset, salesRefresh])
 
   const loadArchivePage = useCallback(async (cursor: string | null) => {
     const requestId = ++archiveRequestRef.current
@@ -467,7 +547,7 @@ export function PosCart({
     }
     updateCart((lines) => current
       ? lines.map((line) => line.product.id === product.id ? { ...line, quantity: line.quantity + 1 } : line)
-      : [...lines, { product, quantity: 1 }])
+      : [...lines, { product, quantity: 1, unitPriceMinor: Math.round(product.price * 100) }])
     setMessage(current ? `${product.name} quantity increased.` : `${product.name} added to cart.`)
   }
 
@@ -541,6 +621,42 @@ export function PosCart({
     window.setTimeout(() => scanInputRef.current?.focus(), 0)
   }
 
+  const commitUnitPrice = (id: number) => {
+    const rawValue = unitPriceDrafts[id]
+    if (rawValue === undefined) return
+
+    const price = Number(rawValue)
+    const unitPriceMinor = Math.round(price * 100)
+
+    if (
+      rawValue.trim() === '' ||
+      !Number.isFinite(price) ||
+      price < 0 ||
+      !Number.isSafeInteger(unitPriceMinor) ||
+      Math.abs(price * 100 - unitPriceMinor) > 0.000001
+    ) {
+      setMessage('Unit price must be a valid amount with no more than two decimal places.')
+      setUnitPriceDrafts((drafts) => {
+        const next = { ...drafts }
+        delete next[id]
+        return next
+      })
+      return
+    }
+
+    updateCart((lines) =>
+      lines.map((line) =>
+        line.product.id === id ? { ...line, unitPriceMinor } : line
+      )
+    )
+    setUnitPriceDrafts((drafts) => {
+      const next = { ...drafts }
+      delete next[id]
+      return next
+    })
+    setMessage('')
+  }
+
   const commitQuantity = (id: number) => {
     const rawValue = quantityDrafts[id]
     if (rawValue === undefined) return
@@ -565,6 +681,7 @@ export function PosCart({
     await writeLocalRecord('sales', sale.id, sale, locallyQueued).catch((error) => console.warn('Could not cache completed sale history:', error))
     updateCart(() => [])
     setQuantityDrafts({})
+    setUnitPriceDrafts({})
     setCashTendered('')
     setPending(null)
     setLastSale(sale)
@@ -625,7 +742,7 @@ export function PosCart({
       }
       request = {
         idempotencyKey: crypto.randomUUID(),
-        items: cartRef.current.map(({ product, quantity }) => ({ productId: product.id, quantity })),
+        items: cartRef.current.map(({ product, quantity, unitPriceMinor }) => ({ productId: product.id, quantity, unitPriceMinor })),
         cashTendered: tender,
       }
       setPending(request)
@@ -635,7 +752,7 @@ export function PosCart({
     setMessage('Checkout processing…')
     setPrintError('')
     const saveOfflineCheckout = async () => {
-      const localLines = cartRef.current.map(({ product, quantity }) => ({ productId: product.id, name: product.name, sku: product.sku, barcode: product.barcode ?? '', quantity, unitPriceMinor: Math.round(product.price * 100), lineTotalMinor: Math.round(Math.round(product.price * 100) * quantity) }))
+      const localLines = cartRef.current.map(({ product, quantity, unitPriceMinor }) => ({ productId: product.id, name: product.name, sku: product.sku, barcode: product.barcode ?? '', quantity, unitPriceMinor, lineTotalMinor: Math.round(unitPriceMinor * quantity) }))
       const totalMinor = localLines.reduce((sum, line) => sum + line.lineTotalMinor, 0)
       if (!Number.isSafeInteger(totalMinor) || totalMinor < 0 || localLines.some((line) => !Number.isSafeInteger(line.unitPriceMinor) || line.unitPriceMinor < 0 || !Number.isSafeInteger(line.lineTotalMinor) || line.lineTotalMinor < 0)) throw new Error('The cart total is outside the supported payment range.')
       if (Math.round(request.cashTendered * 100) < totalMinor) throw new Error('Cash received is less than the amount due.')
@@ -766,20 +883,25 @@ export function PosCart({
       return !value || !Number.isFinite(quantity) || quantity <= 0 || Math.abs(quantity * 1000 - Math.round(quantity * 1000)) > 0.000001
     })
     if (!quantitiesValid) { setMessage('Fix the invalid quantity before submitting this order.'); return }
-    const lines = cartRef.current.map(({ product, quantity }) => ({ product, quantity }))
+    const lines = cartRef.current.map(({ product, quantity, unitPriceMinor }) => ({ product, quantity, unitPriceMinor }))
     for (const line of lines) {
       const available = availableStock(line.product)
       if (line.quantity > available) { setMessage(`Insufficient available stock for ${line.product.name}. Available: ${available}.`); return }
-      if (!Number.isFinite(line.product.price) || line.product.price < 0) { setMessage(`${line.product.name} has an invalid selling price.`); return }
+      if (!Number.isSafeInteger(line.unitPriceMinor) || line.unitPriceMinor < 0) { setMessage(`${line.product.name} has an invalid cart price.`); return }
     }
-    const items = lines.map(({ product, quantity }) => ({ productId: product.id, quantity }))
+    const items = lines.map(({ product, quantity, unitPriceMinor }) => ({ productId: product.id, quantity, unitPriceMinor }))
     const id = crypto.randomUUID()
     const createdAt = new Date().toISOString()
     const reference = `PO-${createdAt.slice(0, 10).replaceAll('-', '')}-${id.slice(0, 8).toUpperCase()}`
-    const orderItems = lines.map(({ product, quantity }) => {
-      const unitPriceMinor = Math.round(product.price * 100)
-      return { productId: product.id, name: product.name, sku: product.sku || product.model, barcode: product.barcode ?? '', quantity, unitPriceMinor, lineTotalMinor: Math.round(unitPriceMinor * quantity) }
-    })
+    const orderItems = lines.map(({ product, quantity, unitPriceMinor }) => ({
+      productId: product.id,
+      name: product.name,
+      sku: product.sku || product.model,
+      barcode: product.barcode ?? '',
+      quantity,
+      unitPriceMinor,
+      lineTotalMinor: Math.round(unitPriceMinor * quantity),
+    }))
     const totalMinor = orderItems.reduce((sum, line) => sum + line.lineTotalMinor, 0)
     if (!Number.isSafeInteger(totalMinor) || orderItems.some((line) => !Number.isSafeInteger(line.lineTotalMinor))) { setMessage('Order total is outside the supported amount.'); return }
     const localOrder: PendingOrder = { id, reference, status: 'Pending', customerName: customerName.trim(), customerPhone: customerPhone.trim(), createdAt, items: orderItems, subtotalMinor: totalMinor, totalMinor, history: [{ at: createdAt, actor: 'You (this device)', event: 'Order submitted' }], localPending: true }
@@ -896,6 +1018,64 @@ export function PosCart({
     }
   }
 
+  const printUnitsReport = async () => {
+    if (unitsPrintLock.current || !unitsRange?.from || !unitsRange.to || !filteredUnits.length) return
+
+    unitsPrintLock.current = true
+    setUnitsPrinting(true)
+    setUnitsPrintError('')
+    setUnitsPrintStatus('Sending units sold report to the printer…')
+
+    const requestId = crypto.randomUUID()
+    const payload = {
+      workspace,
+      from: unitsRange.from.toISOString(),
+      to: new Date(unitsRange.to.getTime() - 86400000).toISOString(),
+      printedAt: new Date().toLocaleString(),
+      items: filteredUnits,
+      totalUnits: filteredUnits.reduce((total, item) => total + item.quantitySold, 0),
+      productCount: filteredUnits.length,
+    }
+
+    try {
+      const base = 'http://127.0.0.1:17891'
+      const grantResponse = await fetch(`${base}/authorize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(5000),
+      })
+      const grant = await grantResponse.json().catch(() => null)
+      if (!grantResponse.ok || typeof grant?.authorization !== 'string') {
+        throw new Error(typeof grant?.error === 'string' ? grant.error : 'Local printer authorization failed')
+      }
+
+      const response = await fetch(`${base}/print-report`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${grant.authorization}`,
+          'Idempotency-Key': requestId,
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(30000),
+      })
+      const result = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(typeof result?.error === 'string' ? result.error : 'Printer rejected the report')
+      }
+      setUnitsPrintStatus(`Units sold report sent to ${typeof result.printer === 'string' ? result.printer : 'the printer'}.`)
+    } catch (error) {
+      setUnitsPrintStatus('')
+      setUnitsPrintError(error instanceof TypeError
+        ? 'Could not reach the local printer bridge. Check that the printer bridge is running and this site has local-network permission.'
+        : error instanceof Error ? error.message : 'Units sold report printing failed.')
+    } finally {
+      unitsPrintLock.current = false
+      setUnitsPrinting(false)
+    }
+  }
+
   useEffect(() => { onRegisterPrint(printSale) }, [onRegisterPrint, printSale])
 
   const effectiveTenderMinor = cashTendered.trim() === '' ? subtotalMinor : Math.round((Number(cashTendered) || 0) * 100)
@@ -923,7 +1103,7 @@ export function PosCart({
           <h2 id="pos-title">Point of Sale / Cart</h2>
           <p>Scan a product or search inventory to add it to this cart.</p>
         </div>
-        <button className="secondary-button pos-clear" type="button" onClick={() => { updateCart(() => []); setQuantityDrafts({}); setMessage('Cart cleared.') }} disabled={!cart.length || cartLocked}>
+        <button className="secondary-button pos-clear" type="button" onClick={() => { updateCart(() => []); setQuantityDrafts({}); setUnitPriceDrafts({}); setMessage('Cart cleared.') }} disabled={!cart.length || cartLocked}>
           <Trash2 /> Clear cart
         </button>
       </div>
@@ -972,14 +1152,36 @@ export function PosCart({
             {cart.length === 0 ? <div className="pos-empty"><ShoppingCart /><b>Your cart is empty</b><span>Scan or search for an inventory product to get started.</span></div> : <>
               <div className="pos-table-wrap"><table className="pos-table">
                 <thead><tr><th>Product</th><th>Unit price</th><th>Quantity</th><th>Line total</th><th><span className="pos-visually-hidden">Actions</span></th></tr></thead>
-                <tbody>{cart.map(({ product, quantity }) => <tr key={product.id}>
+                <tbody>{cart.map(({ product, quantity, unitPriceMinor }) => <tr key={product.id}>
                   <td><b>{product.name}</b><small>{product.sku || product.model}{product.barcode ? ` · ${product.barcode}` : ''}</small></td>
-                  <td>{money(product.price, currency)}</td>
+                  <td><div className="pos-unit-price">
+                    <span>{currency}</span>
+                    <input
+                      aria-label={`${product.name} unit price`}
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={unitPriceDrafts[product.id] ?? (unitPriceMinor / 100).toFixed(2)}
+                      disabled={cartLocked}
+                      onChange={(event) => setUnitPriceDrafts((drafts) => ({ ...drafts, [product.id]: event.target.value }))}
+                      onBlur={() => commitUnitPrice(product.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          event.currentTarget.blur()
+                        }
+                      }}
+                    />
+                  </div></td>
                   <td><div className="pos-quantity"><button type="button" aria-label={`Decrease ${product.name} quantity`} disabled={cartLocked} onClick={() => { setQuantityDrafts((drafts) => { const next = { ...drafts }; delete next[product.id]; return next }); quantity <= 1 ? updateCart((lines) => lines.filter((line) => line.product.id !== product.id)) : updateCart((lines) => lines.map((line) => line.product.id === product.id ? { ...line, quantity: line.quantity - 1 } : line)) }}><Minus /></button>
                     <input aria-label={`${product.name} quantity`} type="number" min="0.001" step="0.001" value={quantityDrafts[product.id] ?? quantity} disabled={cartLocked} onChange={(event) => changeQuantity(product.id, event.target.value)} onBlur={() => commitQuantity(product.id)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }} />
                     <button type="button" aria-label={`Increase ${product.name} quantity`} disabled={cartLocked || quantity + 1 > availableStock(product)} onClick={() => { setQuantityDrafts((drafts) => { const next = { ...drafts }; delete next[product.id]; return next }); updateCart((lines) => lines.map((line) => line.product.id === product.id ? { ...line, quantity: line.quantity + 1 } : line)) }}><Plus /></button></div></td>
-                  <td><b>{moneyMinor(Math.round(Math.round(product.price * 100) * quantity), currency)}</b></td>
-                  <td><button className="pos-icon-action pos-remove" type="button" disabled={cartLocked} onClick={() => updateCart((lines) => lines.filter((line) => line.product.id !== product.id))} aria-label={`Remove ${product.name}`}><Trash2 /></button></td>
+                  <td><b>{moneyMinor(Math.round(unitPriceMinor * quantity), currency)}</b></td>
+                  <td><button className="pos-icon-action pos-remove" type="button" disabled={cartLocked} onClick={() => {
+                    updateCart((lines) => lines.filter((line) => line.product.id !== product.id))
+                    setQuantityDrafts((drafts) => { const next = { ...drafts }; delete next[product.id]; return next })
+                    setUnitPriceDrafts((drafts) => { const next = { ...drafts }; delete next[product.id]; return next })
+                  }} aria-label={`Remove ${product.name}`}><Trash2 /></button></td>
                 </tr>)}</tbody>
               </table></div>
             </>}
@@ -1017,6 +1219,76 @@ export function PosCart({
             <div className="pos-sales-metrics"><div><span>Completed sales</span><b>{periodSummary.saleCount.toLocaleString()}</b></div><div><span>Sales value</span><b>{moneyMinor(periodSummary.totalMinor, currency)}</b></div><div><span>Units sold</span><b>{periodSummary.unitsSold.toLocaleString(undefined, { maximumFractionDigits: 3 })}</b></div></div>
             {periodLoading && <p className="pos-history-footnote" role="status">Updating sales summary…</p>}
             {periodError && <p className="pos-error pos-history-footnote" role="alert">{periodError}</p>}
+          </section>
+
+          <section className="panel pos-units-report" aria-labelledby="units-report-title">
+            <div className="pos-panel-heading pos-units-heading">
+              <div>
+                <h3 id="units-report-title">Units Sold Report</h3>
+                <span>Product quantities sold during the selected period</span>
+              </div>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void printUnitsReport()}
+                disabled={unitsLoading || !!unitsError || !unitsRange?.from || !unitsRange.to || filteredUnits.length === 0 || unitsPrinting}
+              >
+                <Printer size={16} />
+                {unitsPrinting ? 'Printing…' : 'Print report'}
+              </button>
+            </div>
+
+            <SalesRangeControls
+              preset={unitsPreset}
+              setPreset={setUnitsPreset}
+              customFrom={unitsFrom}
+              setCustomFrom={setUnitsFrom}
+              customTo={unitsTo}
+              setCustomTo={setUnitsTo}
+            />
+
+            <div className="pos-sales-metrics">
+              <div><span>Total units sold</span><b>{unitsReport.totalUnits.toLocaleString(undefined, { maximumFractionDigits: 3 })}</b></div>
+              <div><span>Products sold</span><b>{unitsReport.productCount.toLocaleString()}</b></div>
+            </div>
+
+            <label className="pos-recent-search pos-units-search">
+              <Search size={14} />
+              <input
+                value={unitsQuery}
+                onChange={(event) => setUnitsQuery(event.target.value)}
+                placeholder="Search product name"
+                aria-label="Search units sold report by product name"
+              />
+            </label>
+
+            {unitsLoading && <p className="pos-history-empty" role="status">Loading units sold…</p>}
+            {unitsError && <p className="pos-error pos-history-empty" role="alert">{unitsError}</p>}
+            {unitsPrintError && <p className="pos-error pos-history-empty" role="alert">{unitsPrintError}</p>}
+            {unitsPrintStatus && <p className="pos-history-footnote" role="status">{unitsPrintStatus}</p>}
+
+            {!unitsLoading && !unitsError && filteredUnits.length > 0 && (
+              <div className="pos-units-table-wrap">
+                <table className="pos-table pos-units-table">
+                  <thead><tr><th>Product</th><th>Units sold</th></tr></thead>
+                  <tbody>
+                    {filteredUnits.map((item) => (
+                      <tr key={item.productId}>
+                        <td><b>{item.name}</b></td>
+                        <td><b>{item.quantitySold.toLocaleString(undefined, { maximumFractionDigits: 3 })}</b></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {!unitsLoading && !unitsError && filteredUnits.length === 0 && (
+              <p className="pos-history-empty">
+                {unitsQuery.trim() ? 'No products match your search.' : 'No recorded units sold in this period.'}
+              </p>
+            )}
+            <p className="pos-history-footnote">This report counts quantities from recorded sales. It does not represent current stock.</p>
           </section>
 
           <section className="panel pos-recent-sales">
@@ -1100,9 +1372,9 @@ function SalesRangeControls({ preset, setPreset, customFrom, setCustomFrom, cust
     <div className="pos-sales-filters">
       <label>
         <CalendarDays size={14} />
-        <span className="pos-visually-hidden">Receipt date range</span>
+        <span className="pos-visually-hidden">Date range</span>
         <select
-          aria-label="Receipt date range"
+          aria-label="Date range"
           value={preset}
           onChange={(event) => {
             setOpenCalendar(null)

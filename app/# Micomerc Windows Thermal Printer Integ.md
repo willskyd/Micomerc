@@ -8,19 +8,19 @@ The integration allows Micomerc to print receipts directly from its website usin
 
 ### Hardware and software
 
-| Component             | Technology                                                 |
-| --------------------- | ---------------------------------------------------------- |
-| POS application       | Micomerc                                                   |
-| Website               | [https://micomerc.vercel.app](https://micomerc.vercel.app) |
-| Frontend              | Next.js, React, TypeScript                                 |
-| Deployment            | Vercel                                                     |
-| Operating system      | Windows 11                                                 |
-| Printer               | HPRT MPT-II                                                |
-| Printer paper         | 58mm thermal paper                                         |
-| Printer connection    | Bluetooth                                                  |
-| Local bridge          | Node.js                                                    |
-| Printing method       | Windows Print Spooler                                      |
-| Printer communication | ESC/POS                                                    |
+| Component | Technology |
+|---|---|
+| POS application | Micomerc |
+| Website | https://micomerc.vercel.app |
+| Frontend | Next.js, React, TypeScript |
+| Deployment | Vercel |
+| Operating system | Windows 11 |
+| Printer | HPRT MPT-II |
+| Printer paper | 58mm thermal paper |
+| Printer connection | Bluetooth |
+| Local bridge | Node.js |
+| Printing method | Windows Print Spooler |
+| Printer communication | ESC/POS |
 
 ## 2. How the Integration Works
 
@@ -34,12 +34,10 @@ Instead, we created a local Windows printer bridge that receives receipt data fr
        MICOMERC WEBSITE
     https://micomerc.vercel.app
                |
-               |
           HTTPS Request
                |
                v
        CHROME / EDGE BROWSER
-               |
                |
       Local network permission
       Apps on device permission
@@ -47,7 +45,6 @@ Instead, we created a local Windows printer bridge that receives receipt data fr
                v
        WINDOWS PRINTER BRIDGE
        127.0.0.1:17891
-               |
                |
           Node.js Server
                |
@@ -58,8 +55,7 @@ Instead, we created a local Windows printer bridge that receives receipt data fr
                v
        WINDOWS PRINT SPOOLER
                |
-               |
-          Bluetooth
+           Bluetooth
                |
                v
           HPRT MPT-II
@@ -136,6 +132,7 @@ micro-mec-printer/
 ├── receipt-format.mjs
 ├── printer-spooler.ps1
 ├── printer-token.txt
+├── start-printer-bridge.ps1
 │
 ├── package.json
 └── node_modules/
@@ -193,6 +190,19 @@ It uses Windows Print Spooler APIs to submit the formatted receipt bytes as a RA
 
 This allows the printer to receive ESC/POS commands through the Windows printer queue.
 
+**start-printer-bridge.ps1**
+
+This is the Windows startup script created to launch the printer bridge automatically.
+
+It:
+
+- Checks whether the bridge is already running.
+- Avoids starting a second copy if the bridge is already healthy.
+- Sets the allowed Micomerc website origin.
+- Starts the Node.js bridge in the background.
+- Checks the health endpoint after startup.
+- Reports whether the bridge started successfully.
+
 ## 6. Step Four: Configure Printer Authorization
 
 The local bridge was protected so that arbitrary websites could not freely submit print jobs.
@@ -248,7 +258,7 @@ http://127.0.0.1:17891/health
 
 Before connecting the website, we tested the bridge independently.
 
-### Start the bridge
+### Start the bridge manually
 
 Open PowerShell:
 
@@ -460,52 +470,194 @@ After configuring Chrome:
 
 The receipt successfully printed physically through the HPRT MPT-II.
 
-\<blockquote> \*\*FINAL RESULT: SUCCESS\*\*
+> **FINAL RESULT: SUCCESS**
+>
+> Micomerc successfully prints receipts from its live website through the Windows 11 computer and the HPRT MPT-II Bluetooth thermal printer.
 
-Micomerc now prints receipts from its live website through the Windows 11 computer and the HPRT MPT-II Bluetooth thermal printer.
+## 12. Step Ten: Configure Automatic Printer Bridge Startup
 
-\</blockquote>
+Initially, the printer bridge had to be started manually through PowerShell every time it was needed.
 
-## 12. How to Use the Printer Every Day
+To remove this daily manual step, we created a PowerShell startup script and configured Windows Task Scheduler to launch it automatically at user sign-in.
 
-Whenever you want to print Micomerc receipts:
+### A. Create the startup script
 
-### On Windows
+File location:
 
-Open PowerShell:
-
-```powershell
-cd C:\Users\LENOVO\micro-mec-printer
-
-$env:MICRO_MEC_ALLOWED_ORIGINS = "https://micomerc.vercel.app"
-
-node .\printer-bridge.mjs
+```text
+C:\Users\LENOVO\micro-mec-printer\start-printer-bridge.ps1
 ```
 
-Keep this PowerShell window open.
+The script performs these operations:
 
-### In Chrome
+1. Sets the error-handling behavior.
+2. Defines the bridge folder and Node.js executable.
+3. Checks the bridge health endpoint.
+4. Avoids launching a duplicate bridge if one is already running.
+5. Sets the allowed Micomerc website origin.
+6. Starts Node.js in the background.
+7. Waits for startup.
+8. Checks the bridge health endpoint.
+9. Reports whether startup succeeded.
 
-1. Open [https://micomerc.vercel.app](https://micomerc.vercel.app).
-2. Sign in.
-3. Complete a sale or open an existing saved receipt.
-4. Click Print.
+The script was tested using:
 
-The receipt should go to the HPRT MPT-II.
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\LENOVO\micro-mec-printer\start-printer-bridge.ps1"
+```
 
-## 13. Troubleshooting Guide
+Successful result:
 
-| Problem                              | What to check                             |
-| ------------------------------------ | ----------------------------------------- |
-| Printer needs attention              | Check that the Windows bridge is running  |
-| Could not reach local printer bridge | Check the bridge and browser permissions  |
-| Loopback address space blocked       | Allow Apps on device in Chrome            |
-| Local network permission denied      | Allow Local network access                |
-| Printer not connected                | Check the Windows printer queue           |
-| Printer does not print               | Check Windows Print Spooler               |
-| Bridge does not start                | Check Node.js installation and port 17891 |
-| Website cannot authorize             | Check the allowed-origin configuration    |
-| Receipt formatting is wrong          | Check receipt-format.mjs                  |
+```text
+Micomerc printer bridge is running successfully.
+```
+
+### B. Configure Windows Task Scheduler
+
+We opened Task Scheduler:
+
+```text
+taskschd.msc
+```
+
+Then created a task with the following configuration.
+
+**General tab**
+
+| Setting | Value |
+|---|---|
+| Task name | Micomerc Printer Bridge |
+| Run mode | Run only when user is logged on |
+| Highest privileges | Unchecked |
+
+**Triggers tab**
+
+| Setting | Value |
+|---|---|
+| Begin the task | At log on |
+| User | DESKTOP-2ELD3D1\LENOVO |
+| Enabled | Yes |
+
+**Actions tab**
+
+| Setting | Value |
+|---|---|
+| Action | Start a program |
+| Program | powershell.exe |
+
+Arguments:
+
+```text
+-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Users\LENOVO\micro-mec-printer\start-printer-bridge.ps1"
+```
+
+The task was updated successfully using Administrator PowerShell after an initial access-denied error.
+
+We verified the logon trigger:
+
+```powershell
+(Get-ScheduledTask -TaskName "Micomerc Printer Bridge").Triggers |
+Format-List *
+```
+
+Confirmed trigger account:
+
+```text
+UserId : DESKTOP-2ELD3D1\LENOVO
+```
+
+The trigger was enabled.
+
+### C. Test the automatic startup
+
+We closed PowerShell, signed out of Windows, and signed back into the LENOVO account.
+
+After signing in, we opened a new PowerShell window and checked the bridge:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:17891/health |
+ConvertTo-Json -Depth 5
+```
+
+Successful result:
+
+```json
+{
+  "ok": true,
+  "bridgeRunning": true,
+  "printerConnected": true,
+  "printer": {
+    "status": "ready",
+    "bluetoothConnected": null,
+    "printerDeviceReady": true,
+    "writable": true,
+    "printerName": "HPRT MPT-II",
+    "connection": "windows_print_spooler"
+  }
+}
+```
+
+**Result: Automatic startup was successfully tested after signing out and signing back into Windows.**
+
+The bridge now starts automatically when the configured Windows user signs in.
+
+No daily PowerShell startup command is required.
+
+## 13. How to Use the Printer Every Day
+
+The automatic startup configuration removes the need to manually launch the bridge.
+
+### Daily routine
+
+1. Turn on the Windows computer.
+2. Sign in to the LENOVO Windows account.
+3. Turn on the HPRT MPT-II printer.
+4. Allow Windows to reconnect to the printer.
+5. Open Chrome.
+6. Visit https://micomerc.vercel.app.
+7. Complete a sale or open a saved receipt.
+8. Click Print.
+
+The printer bridge should already be running in the background.
+
+### Important operating conditions
+
+- Windows must be running and the configured user must be signed in.
+- The computer must not be asleep while printing.
+- The printer must be powered on and available to Windows.
+- Chrome must retain the required Local network and Apps on device permissions.
+- The browser and printer bridge must be on the same Windows computer.
+
+### Manual recovery if automatic startup fails
+
+If the bridge does not start automatically, open PowerShell and run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\LENOVO\micro-mec-printer\start-printer-bridge.ps1"
+```
+
+Then check its health:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:17891/health |
+ConvertTo-Json -Depth 5
+```
+
+## 14. Troubleshooting Guide
+
+| Problem | What to check |
+|---|---|
+| Printer needs attention | Check that the Windows bridge is running |
+| Could not reach local printer bridge | Check the bridge and browser permissions |
+| Loopback address space blocked | Allow Apps on device in Chrome |
+| Local network permission denied | Allow Local network access |
+| Printer not connected | Check the Windows printer queue |
+| Printer does not print | Check Windows Print Spooler |
+| Bridge does not start | Check Node.js installation and port 17891 |
+| Website cannot authorize | Check the allowed-origin configuration |
+| Receipt formatting is wrong | Check receipt-format.mjs |
+| Automatic startup fails | Check Task Scheduler trigger and task history |
+| Scheduled task does not run | Verify the configured Windows account and logon trigger |
 
 ### Health-check command
 
@@ -514,21 +666,38 @@ Invoke-RestMethod http://127.0.0.1:17891/health |
 ConvertTo-Json -Depth 5
 ```
 
-## 14. Important Security and Operational Notes
+### Check scheduled task status
+
+```powershell
+Get-ScheduledTask -TaskName "Micomerc Printer Bridge" |
+Format-List TaskName,State,TaskPath
+```
+
+### Check the last scheduled task execution
+
+```powershell
+Get-ScheduledTaskInfo -TaskName "Micomerc Printer Bridge" |
+Format-List LastRunTime,LastTaskResult,NextRunTime
+```
+
+A `LastTaskResult` of `0` indicates that the last task execution completed successfully.
+
+## 15. Important Security and Operational Notes
 
 - Keep the bridge bound to `127.0.0.1`, not exposed publicly.
 - Keep the allowed-origin list restricted to trusted websites.
 - Never publish `printer-token.txt` or authorization secrets.
 - Do not expose authorization tokens in screenshots or logs.
-- Keep the Windows bridge running while printing.
+- Keep Windows running and signed in while printing.
 - Do not assume the printer is Bluetooth-connected simply because its Windows queue reports Ready.
 - Do not disable browser security to make printing work.
 - Use the existing authorization mechanism rather than bypassing it.
 - Do not create duplicate print requests when a receipt is already being submitted.
+- The automatic startup task runs at user sign-in; it does not make the bridge run when Windows is shut down or before the configured user signs in.
 
-## 15. Final Architecture Summary
+## 16. Final Architecture Summary
 
-The complete integration consists of three main systems:
+The complete integration consists of four main parts:
 
 **1. Micomerc POS**
 
@@ -538,7 +707,11 @@ Responsible for creating sales, saving transactions, and requesting receipt prin
 
 Responsible for authorization, receiving receipt data, formatting, and submitting print jobs to Windows.
 
-**3. HPRT MPT-II**
+**3. Windows Task Scheduler**
+
+Responsible for automatically starting the local printer bridge when the configured Windows user signs in.
+
+**4. HPRT MPT-II**
 
 Responsible for physically printing the thermal receipt.
 
@@ -569,12 +742,34 @@ Bluetooth
 HPRT MPT-II
 ```
 
-**Integration status: SUCCESSFULLY IMPLEMENTED AND TESTED.**
+Automatic startup path:
 
-Website: [https://micomerc.vercel.app](https://micomerc.vercel.app)
+```text
+Windows Sign-in
+      |
+      v
+Windows Task Scheduler
+      |
+      v
+start-printer-bridge.ps1
+      |
+      v
+Node.js Printer Bridge
+      |
+      v
+127.0.0.1:17891
+```
+
+**Integration status: SUCCESSFULLY IMPLEMENTED, TESTED, AND CONFIGURED FOR AUTOMATIC STARTUP.**
+
+Website: https://micomerc.vercel.app
+
+GitHub: https://github.com/willskyd/Micomerc
 
 Printer: HPRT MPT-II (58mm)
 
 Operating system: Windows 11
 
 Printing method: Windows Print Spooler through a local Node.js bridge.
+
+Automatic startup: Windows Task Scheduler at user sign-in.

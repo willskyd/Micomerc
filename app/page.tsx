@@ -531,7 +531,14 @@ const formatCurrency = (amount: number) => {
   const sku = model || `NEW-${String(Date.now()).slice(-4)}`
   const category = String(f.get('category') || '').trim()
   const price = Number(f.get('price'))
-  if (!name || !category || !Number.isFinite(stock) || stock < 0 || !Number.isFinite(price) || price < 0 || barcode.length > 128 || /[\u0000-\u001f\u007f]/.test(barcode)) {
+  const costPriceText = String(f.get('costPrice') || '').trim()
+  const costPrice = costPriceText === '' ? null : Number(costPriceText)
+
+  if (!name || !category ||
+    !Number.isFinite(stock) || stock < 0 ||
+    !Number.isFinite(price) || price < 0 ||
+    (costPrice !== null && (!Number.isFinite(costPrice) || costPrice < 0)) ||
+    barcode.length > 128 || /[\u0000-\u001f\u007f]/.test(barcode)) {
     setToast('Enter a product name, category, valid stock and price, and a valid barcode')
     return
   }
@@ -550,6 +557,7 @@ const formatCurrency = (amount: number) => {
     category,
     stock,
     price,
+    ...(costPrice !== null ? { costPrice } : {}),
     status: stock === 0
       ? 'Out of stock'
       : stock <= Math.max(0, Number(settings.lowStockThreshold) || 0)
@@ -1419,7 +1427,7 @@ function ProductTable({
   onNotify: (s: string) => void
   onSaveEdit: (
     id: number,
-    updates: Partial<Pick<Product, 'name' | 'model' | 'barcode' | 'category' | 'stock' | 'price' | 'status'>>
+    updates: Partial<Pick<Product, 'name' | 'model' | 'barcode' | 'category' | 'stock' | 'price' | 'costPrice' | 'status'>>
   ) => Promise<void>
   onDelete: (id: number) => void
   lowStockThreshold: number
@@ -1438,11 +1446,22 @@ function ProductTable({
   }
 
   const updateDraft = (
-    key: 'name' | 'model' | 'barcode' | 'category' | 'stock' | 'price' | 'status',
+    key: 'name' | 'model' | 'barcode' | 'category' | 'stock' | 'price' | 'costPrice' | 'status',
     value: string
   ) => {
     setDraft((current) => {
       if (!current) return current
+
+      if (key === 'costPrice') {
+        const trimmed = value.trim()
+        if (trimmed === '') return { ...current, costPrice: null }
+
+        const numberValue = Number(trimmed)
+        return {
+          ...current,
+          costPrice: Number.isFinite(numberValue) ? Math.max(0, numberValue) : 0,
+        }
+      }
 
       if (key === 'stock' || key === 'price') {
         const numberValue = Number(value)
@@ -1475,6 +1494,7 @@ function ProductTable({
         category: draft.category.trim(),
         stock: draft.stock,
         price: draft.price,
+        costPrice: draft.costPrice ?? null,
         status: draft.status === 'Discontinued' ? 'Discontinued' : 'Automatic',
       })
       setDraft(null)
@@ -1494,6 +1514,7 @@ function ProductTable({
             <th>Category</th>
             <th>In stock</th>
             <th>Unit price</th>
+            <th>Cost price</th>
             <th>Status</th>
             <th />
           </tr>
@@ -1587,6 +1608,21 @@ function ProductTable({
                       aria-label={`Price for ${product.name}`}
                     />
                   ) : product.price}
+                </td>
+
+                <td>
+                  {isEditing ? (
+                    <input
+                      className="table-number price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={row.costPrice ?? ''}
+                      onChange={(e) => updateDraft('costPrice', e.target.value)}
+                      aria-label={`Cost price for ${product.name}`}
+                      placeholder="Optional"
+                    />
+                  ) : product.costPrice != null ? product.costPrice : '—'}
                 </td>
 
                 <td>
@@ -2105,6 +2141,7 @@ function RecordModal({ type, onClose, onSubmit }: { type: 'product' | 'debt' | '
           <label>Model number<input name="model" placeholder="Model number" /></label>
           <label>Barcode (optional)<input name="barcode" type="text" inputMode="text" autoComplete="off" maxLength={128} placeholder="Keep leading zeroes" /></label>
           <label>Price<input name="price" type="number" min="0" step="0.01" required /></label>
+          <label>Cost price (optional)<input name="costPrice" type="number" min="0" step="0.01" placeholder="Leave blank if unknown" /></label>
           <label>Quantity<input name="stock" type="number" min="0" required /></label>
         </div>}
         {type === 'receipt' && <><label>Model number<input name="model" required placeholder="Model number" /></label><div className="form-row"><label>Quantity<input name="quantity" type="number" min="0" required /></label><label>Invoice<input name="invoice" required placeholder="Invoice number" /></label></div></>}

@@ -54,32 +54,45 @@ function isTransactionUnavailable(error: unknown): boolean {
     (typeof message === "string" && message.includes("Transaction numbers are only allowed"));
 }
 
-function normalizeCheckoutItems(value: unknown): { productId: number; quantity: number; quantityMilli: number }[] {
+function normalizeCheckoutItems(value: unknown): { productId: number; quantity: number; quantityMilli: number; unitPriceMinor?: number }[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > 500) {
     throw new CheckoutError("Add at least one product before checkout", 400);
   }
 
-  const quantities = new Map<number, number>();
+  const quantities = new Map<number, { quantityMilli: number; unitPriceMinor?: number }>()
   for (const entry of value) {
     if (typeof entry !== "object" || entry === null || !("productId" in entry) || !("quantity" in entry)) {
       throw new CheckoutError("Cart item is invalid", 400);
     }
-    const { productId, quantity } = entry;
+    const { productId, quantity } = entry
+    const unitPriceMinor = "unitPriceMinor" in entry ? entry.unitPriceMinor : undefined
     if (typeof productId !== "number" || !Number.isSafeInteger(productId) || productId <= 0 ||
       typeof quantity !== "number" || !Number.isFinite(quantity) || quantity <= 0 || quantity > 1_000_000) {
       throw new CheckoutError("Product IDs and quantities must be valid positive numbers", 400);
+    }
+    if (unitPriceMinor !== undefined &&
+      (typeof unitPriceMinor !== "number" || !Number.isSafeInteger(unitPriceMinor) || unitPriceMinor < 0)) {
+      throw new CheckoutError("Cart unit prices must be valid amounts", 400);
     }
     const quantityMilli = Math.round(quantity * 1000);
     if (Math.abs(quantity * 1000 - quantityMilli) > 0.000001) {
       throw new CheckoutError("Quantities can have at most three decimal places", 400);
     }
-    quantities.set(productId, (quantities.get(productId) ?? 0) + quantityMilli);
+    const previous = quantities.get(productId)
+    if (previous && previous.unitPriceMinor !== unitPriceMinor) {
+      throw new CheckoutError("Duplicate cart items must use the same unit price", 400);
+    }
+    quantities.set(productId, {
+      quantityMilli: (previous?.quantityMilli ?? 0) + quantityMilli,
+      unitPriceMinor,
+    })
   }
 
-  return [...quantities.entries()].map(([productId, quantityMilli]) => ({
+  return [...quantities.entries()].map(([productId, value]) => ({
     productId,
-    quantity: quantityMilli / 1000,
-    quantityMilli,
+    quantity: value.quantityMilli / 1000,
+    quantityMilli: value.quantityMilli,
+    ...(value.unitPriceMinor !== undefined ? { unitPriceMinor: value.unitPriceMinor } : {}),
   }));
 }
 
@@ -189,7 +202,7 @@ export async function POST(request: Request) {
     const items = normalizeCheckoutItems(body.items);
     const amountTenderedMinor = parseCashTendered(body.cashTendered);
     const requestHash = createHash("sha256")
-      .update(JSON.stringify({ items: items.map(({ productId, quantityMilli }) => ({ productId, quantityMilli })), amountTenderedMinor }))
+      .update(JSON.stringify({ items: items.map(({ productId, quantityMilli, unitPriceMinor }) => ({ productId, quantityMilli, unitPriceMinor })), amountTenderedMinor }))
       .digest("hex");
 
     const client = await clientPromise();
@@ -237,10 +250,15 @@ export async function POST(request: Request) {
           if (availableStock < item.quantity) {
             throw new CheckoutError(`Insufficient stock for ${product.name}. Available: ${Math.max(0, availableStock)}`, 409);
           }
-          if (typeof product.price !== "number" || !Number.isFinite(product.price) || product.price < 0 || product.price > Number.MAX_SAFE_INTEGER / 100) {
-            throw new CheckoutError(`${product.name} has an invalid selling price`, 409);
+          const unitPriceMinor = item.unitPriceMinor ?? (
+            typeof product.price === "number" && Number.isFinite(product.price) &&
+            product.price >= 0 && product.price <= Number.MAX_SAFE_INTEGER / 100
+              ? Math.round(product.price * 100)
+              : NaN
+          )
+          if (!Number.isSafeInteger(unitPriceMinor) || unitPriceMinor < 0) {
+            throw new CheckoutError(`${product.name} has an invalid cart selling price`, 409);
           }
-          const unitPriceMinor = Math.round(product.price * 100);
           const lineTotalMinor = Math.round(unitPriceMinor * item.quantityMilli / 1000);
           return {
             productId: product.id,

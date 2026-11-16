@@ -52,6 +52,18 @@ export async function POST(request: Request) {
     const barcodeValue = body.barcode === undefined ? "" : body.barcode;
     const parsedStock = Number(stock);
     const parsedPrice = Number(price);
+    const rawCostPrice = body.costPrice;
+    let parsedCostPrice: number | null = null;
+
+    if (rawCostPrice !== undefined && rawCostPrice !== null && rawCostPrice !== "") {
+      if (typeof rawCostPrice !== "number" && typeof rawCostPrice !== "string") {
+        return NextResponse.json({ message: "Cost price must be a non-negative number" }, { status: 400 });
+      }
+      parsedCostPrice = Number(rawCostPrice);
+      if (!Number.isFinite(parsedCostPrice) || parsedCostPrice < 0) {
+        return NextResponse.json({ message: "Cost price must be a non-negative number" }, { status: 400 });
+      }
+    }
 
     if (
       typeof name !== "string" || !name.trim() ||
@@ -83,7 +95,7 @@ export async function POST(request: Request) {
     const collection = db.collection<any>(COLLECTION);
     const operationId = typeof body.operationId === "string" ? body.operationId : "";
     if (operationId && !UUID.test(operationId)) return NextResponse.json({ message: "Product operation ID is invalid" }, { status: 400 });
-    const productInput = { name: name.trim(), model: model.trim(), sku: sku.trim(), category: category.trim(), barcode, stock: parsedStock, price: parsedPrice, status: String(status).trim() };
+    const productInput = { name: name.trim(), model: model.trim(), sku: sku.trim(), category: category.trim(), barcode, stock: parsedStock, price: parsedPrice, ...(parsedCostPrice !== null ? { costPrice: parsedCostPrice } : {}), status: String(status).trim() };
     const requestHash = createHash("sha256").update(JSON.stringify(productInput)).digest("hex");
     if (operationId) {
       const replay = await collection.findOne({ _id: operationId });

@@ -16,12 +16,23 @@ function publicOrder(value: OrderDoc) {
 
 function parseItems(value: unknown) {
   if (!Array.isArray(value) || value.length < 1 || value.length > 100) throw new InventoryError('Add at least one product to the pending order')
-  const quantities = new Map<number, number>()
+  const quantities = new Map<number, { quantity: number; unitPriceMinor?: number }>()
   for (const line of value) {
     if (!line || typeof line !== 'object' || !('productId' in line) || !('quantity' in line) || typeof line.productId !== 'number' || !Number.isSafeInteger(line.productId) || line.productId <= 0 || typeof line.quantity !== 'number' || !Number.isFinite(line.quantity) || line.quantity <= 0 || line.quantity > 1_000_000 || Math.abs(line.quantity * 1000 - Math.round(line.quantity * 1000)) > 0.000001) throw new InventoryError('Pending order items or quantities are invalid')
-    quantities.set(line.productId, Math.round(((quantities.get(line.productId) ?? 0) + line.quantity) * 1000) / 1000)
+    const unitPriceMinor = 'unitPriceMinor' in line ? line.unitPriceMinor : undefined
+    if (unitPriceMinor !== undefined && (typeof unitPriceMinor !== 'number' || !Number.isSafeInteger(unitPriceMinor) || unitPriceMinor < 0)) throw new InventoryError('Pending order cart prices are invalid')
+    const previous = quantities.get(line.productId)
+    if (previous && previous.unitPriceMinor !== unitPriceMinor) throw new InventoryError('Duplicate pending order items must use the same unit price')
+    quantities.set(line.productId, {
+      quantity: Math.round(((previous?.quantity ?? 0) + line.quantity) * 1000) / 1000,
+      unitPriceMinor,
+    })
   }
-  return [...quantities].map(([productId, quantity]) => ({ productId, quantity }))
+  return [...quantities].map(([productId, value]) => ({
+    productId,
+    quantity: value.quantity,
+    ...(value.unitPriceMinor !== undefined ? { unitPriceMinor: value.unitPriceMinor } : {}),
+  }))
 }
 
 export async function GET() {
@@ -77,8 +88,13 @@ export async function POST(request: Request) {
           const product = await products.findOne({ id: requested.productId }, { session })
           if (!product || typeof product.stock !== 'number') throw new InventoryError(`Product ${requested.productId} is no longer available`, 409)
           if (String(product.status ?? '').trim().toLowerCase() === 'discontinued') throw new InventoryError(`${product.name} is discontinued`, 409)
-          if (typeof product.price !== 'number' || !Number.isFinite(product.price) || product.price < 0 || product.price > Number.MAX_SAFE_INTEGER / 100) throw new InventoryError(`${product.name} has an invalid price`, 409)
-          const unitPriceMinor = Math.round(product.price * 100)
+          const unitPriceMinor = requested.unitPriceMinor ?? (
+            typeof product.price === 'number' && Number.isFinite(product.price) &&
+            product.price >= 0 && product.price <= Number.MAX_SAFE_INTEGER / 100
+              ? Math.round(product.price * 100)
+              : NaN
+          )
+          if (!Number.isSafeInteger(unitPriceMinor) || unitPriceMinor < 0) throw new InventoryError(`${product.name} has an invalid cart price`, 409)
           const lineTotalMinor = Math.round(unitPriceMinor * requested.quantity)
           if (!Number.isSafeInteger(lineTotalMinor)) throw new InventoryError('Pending order total exceeds the supported amount')
           const reservation = await products.updateOne({ id: requested.productId, $expr: { $gte: [{ $subtract: ['$stock', { $ifNull: ['$reservedStock', 0] }] }, requested.quantity] }, status: { $not: /^Discontinued$/i } }, { $inc: { reservedStock: requested.quantity } }, { session })

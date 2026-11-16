@@ -9,6 +9,7 @@ export type Product = {
   category: string
   stock: number
   price: number
+  costPrice?: number | null
   status: string
   revision?: number
   reservedStock?: number
