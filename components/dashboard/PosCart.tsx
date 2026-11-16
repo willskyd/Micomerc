@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { DayPicker } from 'react-day-picker'
 import { Barcode, CalendarDays, Check, Clock3, FileDown, Minus, Plus, Printer, Search, ShoppingCart, Trash2, X } from 'lucide-react'
 
 import type { PendingOrder, Product, Sale } from './types'
@@ -73,34 +74,113 @@ function isSalesPage(value: unknown): value is SalesPage {
     'unitsSold' in value.summary && typeof value.summary.unitsSold === 'number'
 }
 
-type SalesPreset = 'today' | 'yesterday' | 'this-week' | 'last-week' | 'this-month' | 'last-month' | 'custom'
+type SalesPreset = 'today' | 'custom'
+type SummaryPreset =
+  | 'today'
+  | 'yesterday'
+  | 'thisWeek'
+  | 'lastWeek'
+  | 'thisMonth'
+  | 'custom'
 
-function localMidnight(value: Date) { return new Date(value.getFullYear(), value.getMonth(), value.getDate()) }
+function localMidnight(value: Date) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate())
+}
 
-function salesRange(preset: SalesPreset, customFrom: string, customTo: string): { from: Date | null; to: Date | null } | null {
+function parseSalesDate(value: string): Date | undefined {
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return undefined
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  return date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+    ? date
+    : undefined
+}
+
+function formatSalesDateInput(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function displaySalesDate(value: string, placeholder: string): string {
+  const date = parseSalesDate(value)
+  return date
+    ? date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+    : placeholder
+}
+
+function salesRange(
+  preset: SalesPreset,
+  customFrom: string,
+  customTo: string
+): { from: Date | null; to: Date | null } | null {
   const today = localMidnight(new Date())
-  const nextDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1)
-  if (preset === 'custom') {
-    const parse = (value: string) => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
-      const [year, month, day] = value.split('-').map(Number)
-      const date = new Date(year, month - 1, day)
-      return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null
-    }
-    const from = customFrom ? parse(customFrom) : null
-    const toDay = customTo ? parse(customTo) : null
-    if ((customFrom && !from) || (customTo && !toDay) || (from && toDay && from > toDay)) return null
-    return { from, to: toDay ? nextDay(toDay) : null }
+  const nextDay = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1)
+
+  if (preset === 'today') {
+    return { from: today, to: nextDay(today) }
   }
-  if (preset === 'today') return { from: today, to: nextDay(today) }
-  if (preset === 'yesterday') { const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1); return { from: start, to: today } }
-  const weekday = (today.getDay() + 6) % 7
-  const weekStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - weekday)
-  if (preset === 'this-week') return { from: weekStart, to: nextDay(today) }
-  if (preset === 'last-week') return { from: new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() - 7), to: weekStart }
-  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
-  if (preset === 'this-month') return { from: monthStart, to: nextDay(today) }
-  return { from: new Date(today.getFullYear(), today.getMonth() - 1, 1), to: monthStart }
+
+  const from = customFrom ? parseSalesDate(customFrom) ?? null : null
+  const toDay = customTo ? parseSalesDate(customTo) ?? null : null
+
+  if (
+    (customFrom && !from) ||
+    (customTo && !toDay) ||
+    (from && toDay && from.getTime() > toDay.getTime())
+  ) {
+    return null
+  }
+
+  return { from, to: toDay ? nextDay(toDay) : null }
+}
+
+
+function summarySalesRange(
+  preset: SummaryPreset,
+  customFrom: string,
+  customTo: string
+): { from: Date | null; to: Date | null } | null {
+  const today = localMidnight(new Date())
+  const nextDay = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1)
+
+  const day = 24 * 60 * 60 * 1000
+
+  if (preset === 'today') {
+    return { from: today, to: nextDay(today) }
+  }
+
+  if (preset === 'yesterday') {
+    return { from: new Date(today.getTime() - day), to: today }
+  }
+
+  const mondayOffset = (today.getDay() + 6) % 7
+  const thisMonday = new Date(today.getTime() - mondayOffset * day)
+
+  if (preset === 'thisWeek') {
+    return { from: thisMonday, to: new Date(thisMonday.getTime() + 7 * day) }
+  }
+
+  if (preset === 'lastWeek') {
+    return {
+      from: new Date(thisMonday.getTime() - 7 * day),
+      to: thisMonday,
+    }
+  }
+
+  if (preset === 'thisMonth') {
+    return {
+      from: new Date(today.getFullYear(), today.getMonth(), 1),
+      to: new Date(today.getFullYear(), today.getMonth() + 1, 1),
+    }
+  }
+
+  return salesRange('custom', customFrom, customTo)
 }
 
 export function PosCart({
@@ -155,6 +235,9 @@ export function PosCart({
   const [salesPreset, setSalesPreset] = useState<SalesPreset>('today')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
+  const [summaryPreset, setSummaryPreset] = useState<SummaryPreset>('today')
+  const [summaryCustomFrom, setSummaryCustomFrom] = useState('')
+  const [summaryCustomTo, setSummaryCustomTo] = useState('')
   const [periodSummary, setPeriodSummary] = useState<SalesPage['summary']>({ saleCount: 0, totalMinor: 0, unitsSold: 0 })
   const [periodLoading, setPeriodLoading] = useState(false)
   const [periodError, setPeriodError] = useState('')
@@ -220,18 +303,35 @@ export function PosCart({
   const pending = pendingCheckout !== null
   const cartLocked = pending || checkoutLoading
   const selectedRange = useMemo(() => salesRange(salesPreset, customFrom, customTo), [salesPreset, customFrom, customTo])
+  const summaryRange = useMemo(
+    () => summarySalesRange(summaryPreset, summaryCustomFrom, summaryCustomTo),
+    [summaryPreset, summaryCustomFrom, summaryCustomTo]
+  )
   const normalizedReceiptQuery = recentQuery.trim().toLocaleLowerCase()
-  const matchingRecentSales = recentSales.filter((sale) => sale.receiptNumber.toLocaleLowerCase().includes(normalizedReceiptQuery))
+  const isSaleInSelectedRange = (sale: Sale) => {
+    if (!selectedRange) return false
+    const createdAt = new Date(String(sale.createdAt)).getTime()
+    return Number.isFinite(createdAt) &&
+      (!selectedRange.from || createdAt >= selectedRange.from.getTime()) &&
+      (!selectedRange.to || createdAt < selectedRange.to.getTime())
+  }
+  const matchingRecentSales = selectedRange
+    ? recentSales.filter((sale) =>
+        sale.receiptNumber.toLocaleLowerCase().includes(normalizedReceiptQuery) &&
+        isSaleInSelectedRange(sale))
+    : []
   const recentSaleIds = new Set(recentSales.map((sale) => sale.id))
-  const visibleArchiveSales = archiveSearch === recentQuery ? archiveSales.filter((sale) => !recentSaleIds.has(sale.id)) : []
+  const visibleArchiveSales = selectedRange && archiveSearch === recentQuery
+    ? archiveSales.filter((sale) => !recentSaleIds.has(sale.id) && isSaleInSelectedRange(sale))
+    : []
   const visibleReceipts = [...matchingRecentSales, ...visibleArchiveSales]
 
   useEffect(() => {
     if (!active) return
-    if (!selectedRange) { setPeriodLoading(false); setPeriodError('Enter a valid custom date range.'); setPeriodSummary({ saleCount: 0, totalMinor: 0, unitsSold: 0 }); return }
+    if (!summaryRange) { setPeriodLoading(false); setPeriodError('Enter a valid custom date range.'); setPeriodSummary({ saleCount: 0, totalMinor: 0, unitsSold: 0 }); return }
     const params = new URLSearchParams({ paged: '1', limit: '10' })
-    if (selectedRange.from) params.set('from', selectedRange.from.toISOString())
-    if (selectedRange.to) params.set('to', selectedRange.to.toISOString())
+    if (summaryRange.from) params.set('from', summaryRange.from.toISOString())
+    if (summaryRange.to) params.set('to', summaryRange.to.toISOString())
     let cancelled = false
     setPeriodLoading(true); setPeriodError('')
     fetch(`/api/sales?${params.toString()}`, { cache: 'no-store' })
@@ -243,12 +343,22 @@ export function PosCart({
       .catch((error: unknown) => { if (!cancelled) setPeriodError(error instanceof Error ? error.message : 'Sales summary is unavailable') })
       .finally(() => { if (!cancelled) setPeriodLoading(false) })
     return () => { cancelled = true }
-  }, [active, selectedRange, salesRefresh])
+  }, [active, summaryRange, salesRefresh])
 
   const loadArchivePage = useCallback(async (cursor: string | null) => {
     const requestId = ++archiveRequestRef.current
+    if (!selectedRange) {
+      setArchiveSales([])
+      setArchiveCursor(null)
+      setArchiveHasMore(false)
+      setArchiveError('')
+      setArchiveLoading(false)
+      return
+    }
     setArchiveLoading(true); setArchiveError('')
     const params = new URLSearchParams({ paged: '1', limit: '50' })
+    if (selectedRange.from) params.set('from', selectedRange.from.toISOString())
+    if (selectedRange.to) params.set('to', selectedRange.to.toISOString())
     if (recentQuery.trim()) params.set('q', recentQuery.trim())
     if (cursor) params.set('cursor', cursor)
     try {
@@ -266,7 +376,7 @@ export function PosCart({
     } finally {
       if (requestId === archiveRequestRef.current) setArchiveLoading(false)
     }
-  }, [recentQuery])
+  }, [recentQuery, selectedRange])
 
   useEffect(() => {
     if (!active) return
@@ -291,7 +401,7 @@ export function PosCart({
         if (!cancelled) {
           await Promise.all(result.sales.map((sale) => writeLocalRecord('sales', sale.id, sale, false)))
           const [queued, cachedSales] = await Promise.all([listQueuedOperations().catch(() => []), readLocalCollection<Sale>('sales').catch(() => [])])
-          const queuedSales = queued.filter((operation) => operation.type === 'sale.create' && operation.status !== 'synchronized').map((operation) => operation.payload.localSale).filter(isSale)
+          const queuedSales = queued.filter((operation) => (operation.type === 'sale.create' || operation.type === 'pending-order.accept') && operation.status !== 'synchronized').map((operation) => operation.payload.localSale).filter(isSale)
           const localSales = [...queuedSales, ...cachedSales].filter((sale, index, all) => all.findIndex((item) => item.id === sale.id) === index)
           setRecentSales([...localSales, ...result.sales.filter((sale) => !localSales.some((item) => item.id === sale.id))].slice(0, 20))
         }
@@ -741,7 +851,7 @@ export function PosCart({
     printLock.current = true
     setPrinting(true)
     setPrintError('')
-    setPrintStatus(`Sale ${sale.receiptNumber} saved. Sending receipt to the Bluetooth printer…`)
+    setPrintStatus(`Sale ${sale.receiptNumber} saved. Sending receipt to the Windows printer…`)
     const requestId = crypto.randomUUID()
     let lastError: unknown
     try {
@@ -758,11 +868,11 @@ export function PosCart({
           }
           const response = await fetch(`${base}/print-receipt`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${grant.authorization}`, 'Idempotency-Key': requestId },
-            body: JSON.stringify(sale), signal: AbortSignal.timeout(15000),
+            body: JSON.stringify(sale), signal: AbortSignal.timeout(30000),
           })
           const result = await response.json().catch(() => null)
           if (!response.ok) throw new Error(typeof result?.error === 'string' ? result.error : 'Printer rejected the receipt')
-          setPrintStatus(`Receipt ${sale.receiptNumber} sent to ${typeof result.printer === 'string' ? result.printer : 'the Bluetooth printer'}.`)
+          setPrintStatus(`Receipt ${sale.receiptNumber} sent to ${typeof result.printer === 'string' ? result.printer : 'the Windows printer'}.`)
           return
         } catch (error) {
           lastError = error
@@ -774,11 +884,11 @@ export function PosCart({
       }
       throw lastError
     } catch (error) {
-      console.error('Bluetooth receipt print failed:', error)
-      setPrintStatus(`Sale ${sale.receiptNumber} is saved. The Bluetooth receipt was not confirmed.`)
+      console.error('Windows receipt print failed:', error)
+      setPrintStatus(`Sale ${sale.receiptNumber} is saved. The receipt was not confirmed by the Windows printer.`)
       const reason = error instanceof TypeError
-        ? 'Could not reach the local printer bridge. Start the MicroMec printer service and allow this site to access your local network in the browser if prompted.'
-        : error instanceof Error ? error.message : 'Bluetooth printing failed.'
+        ? 'Could not reach the local printer bridge. Start the Micomerc Windows printer bridge and allow this site to access your local network in the browser if prompted.'
+        : error instanceof Error ? error.message : 'Windows printer submission failed.'
       setPrintError(`${reason} Retry the receipt or use the browser/PDF fallback.`)
     } finally {
       printLock.current = false
@@ -896,14 +1006,22 @@ export function PosCart({
 
           <section className="panel pos-todays-sales" aria-labelledby="todays-sales-title">
             <div className="pos-panel-heading"><div><h3 id="todays-sales-title">Today’s Sales</h3><span>Summary for the selected date range</span></div></div>
-            <SalesRangeControls preset={salesPreset} setPreset={setSalesPreset} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} />
+            <SummaryRangeControls
+              preset={summaryPreset}
+              setPreset={setSummaryPreset}
+              customFrom={summaryCustomFrom}
+              setCustomFrom={setSummaryCustomFrom}
+              customTo={summaryCustomTo}
+              setCustomTo={setSummaryCustomTo}
+            />
             <div className="pos-sales-metrics"><div><span>Completed sales</span><b>{periodSummary.saleCount.toLocaleString()}</b></div><div><span>Sales value</span><b>{moneyMinor(periodSummary.totalMinor, currency)}</b></div><div><span>Units sold</span><b>{periodSummary.unitsSold.toLocaleString(undefined, { maximumFractionDigits: 3 })}</b></div></div>
             {periodLoading && <p className="pos-history-footnote" role="status">Updating sales summary…</p>}
             {periodError && <p className="pos-error pos-history-footnote" role="alert">{periodError}</p>}
           </section>
 
           <section className="panel pos-recent-sales">
-            <div className="pos-panel-heading pos-receipts-heading"><div><h3>Recent receipts</h3><span>All saved sales · newest first</span></div><label className="pos-recent-search"><Search size={14} /><input value={recentQuery} onChange={(event) => setRecentQuery(event.target.value)} placeholder="Receipt no." aria-label="Search receipts by receipt number" /><span className="pos-visually-hidden">Search receipts by receipt number</span></label></div>
+            <div className="pos-panel-heading pos-receipts-heading"><div><h3>Recent receipts</h3><span>Saved receipts for the selected date range · newest first</span></div><label className="pos-recent-search"><Search size={14} /><input value={recentQuery} onChange={(event) => setRecentQuery(event.target.value)} placeholder="Receipt no." aria-label="Search receipts by receipt number" /><span className="pos-visually-hidden">Search receipts by receipt number</span></label></div>
+            <SalesRangeControls preset={salesPreset} setPreset={setSalesPreset} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} />
             <div className="pos-receipts-scroll" aria-live="polite">
               {recentLoading && recentSales.length === 0 && <p className="pos-history-empty">Loading receipts…</p>}
               {recentError && <p className="pos-error pos-history-empty" role="alert">{recentError}</p>}
@@ -942,10 +1060,238 @@ function SalesRangeControls({ preset, setPreset, customFrom, setCustomFrom, cust
   customTo: string
   setCustomTo: (value: string) => void
 }) {
-  return <div className="pos-sales-filters"><label><CalendarDays size={14} /><span className="pos-visually-hidden">Sales date range</span><select aria-label="Sales date range" value={preset} onChange={(event) => setPreset(event.target.value as SalesPreset)}><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this-week">This week</option><option value="last-week">Last week</option><option value="this-month">This month</option><option value="last-month">Last month</option><option value="custom">Custom range</option></select></label>{preset === 'custom' && <><label><span className="pos-visually-hidden">Start date</span><input aria-label="Custom start date" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /></label><label><span className="pos-visually-hidden">End date</span><input aria-label="Custom end date" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></label></>}{preset !== 'today' && <button type="button" className="pos-reset-date" onClick={() => { setCustomFrom(''); setCustomTo(''); setPreset('today') }}>Today</button>}</div>
+  const [openCalendar, setOpenCalendar] = useState<'from' | 'to' | null>(null)
+  const fromDate = parseSalesDate(customFrom)
+  const toDate = parseSalesDate(customTo)
+
+  const chooseFromDate = (date: Date | undefined) => {
+    if (!date) return
+    setCustomFrom(formatSalesDateInput(date))
+    if (toDate && date.getTime() > toDate.getTime()) {
+      setCustomTo('')
+    }
+    setOpenCalendar(null)
+  }
+
+  const chooseToDate = (date: Date | undefined) => {
+    if (!date) return
+    setCustomTo(formatSalesDateInput(date))
+    setOpenCalendar(null)
+  }
+
+  const resetToToday = () => {
+    setOpenCalendar(null)
+    setCustomFrom('')
+    setCustomTo('')
+    setPreset('today')
+  }
+
+  const todayButton = (
+    <button
+      type="button"
+      className="pos-reset-date"
+      onClick={resetToToday}
+    >
+      Today
+    </button>
+  )
+
+  return (
+    <div className="pos-sales-filters">
+      <label>
+        <CalendarDays size={14} />
+        <span className="pos-visually-hidden">Receipt date range</span>
+        <select
+          aria-label="Receipt date range"
+          value={preset}
+          onChange={(event) => {
+            setOpenCalendar(null)
+            setPreset(event.target.value as SalesPreset)
+          }}
+        >
+          <option value="today">Today</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+
+      {preset === 'custom' && (
+        <>
+          <div className="pos-sales-date-field">
+            <button
+              type="button"
+              className="pos-sales-date-trigger"
+              aria-label="Choose start date"
+              aria-expanded={openCalendar === 'from'}
+              onClick={() => setOpenCalendar(openCalendar === 'from' ? null : 'from')}
+            >
+              <CalendarDays size={14} />
+              <span>{displaySalesDate(customFrom, 'From date')}</span>
+            </button>
+
+            {openCalendar === 'from' && (
+              <div className="pos-sales-calendar-popup">
+                <DayPicker
+                  mode="single"
+                  selected={fromDate}
+                  defaultMonth={fromDate || toDate || new Date()}
+                  disabled={toDate ? { after: toDate } : undefined}
+                  onSelect={chooseFromDate}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="pos-sales-date-field">
+            <button
+              type="button"
+              className="pos-sales-date-trigger"
+              aria-label="Choose end date"
+              aria-expanded={openCalendar === 'to'}
+              onClick={() => setOpenCalendar(openCalendar === 'to' ? null : 'to')}
+            >
+              <CalendarDays size={14} />
+              <span>{displaySalesDate(customTo, 'To date')}</span>
+            </button>
+
+            {openCalendar === 'to' && (
+              <div className="pos-sales-calendar-popup">
+                <DayPicker
+                  mode="single"
+                  selected={toDate}
+                  defaultMonth={toDate || fromDate || new Date()}
+                  disabled={fromDate ? { before: fromDate } : undefined}
+                  onSelect={chooseToDate}
+                />
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {preset !== 'today' && openCalendar !== 'to' && todayButton}
+
+      {preset !== 'today' && openCalendar === 'to' && (
+        <div className="pos-sales-today-below">
+          {todayButton}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+function SummaryRangeControls({
+  preset,
+  setPreset,
+  customFrom,
+  setCustomFrom,
+  customTo,
+  setCustomTo,
+}: {
+  preset: SummaryPreset
+  setPreset: (value: SummaryPreset) => void
+  customFrom: string
+  setCustomFrom: (value: string) => void
+  customTo: string
+  setCustomTo: (value: string) => void
+}) {
+  const [openCalendar, setOpenCalendar] = useState<'from' | 'to' | null>(null)
+  const fromDate = parseSalesDate(customFrom)
+  const toDate = parseSalesDate(customTo)
+
+  const chooseFromDate = (date: Date | undefined) => {
+    if (!date) return
+    setCustomFrom(formatSalesDateInput(date))
+    if (toDate && date.getTime() > toDate.getTime()) setCustomTo('')
+    setOpenCalendar(null)
+  }
+
+  const chooseToDate = (date: Date | undefined) => {
+    if (!date) return
+    setCustomTo(formatSalesDateInput(date))
+    setOpenCalendar(null)
+  }
+
+  return (
+    <div className="pos-sales-filters">
+      <label>
+        <CalendarDays size={14} />
+        <span className="pos-visually-hidden">Today's Sales date range</span>
+        <select
+          aria-label="Today's Sales date range"
+          value={preset}
+          onChange={(event) => {
+            setOpenCalendar(null)
+            setPreset(event.target.value as SummaryPreset)
+          }}
+        >
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="thisWeek">This week</option>
+          <option value="lastWeek">Last week</option>
+          <option value="thisMonth">This month</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+
+      {preset === 'custom' && (
+        <>
+          <div className="pos-sales-date-field">
+            <button
+              type="button"
+              className="pos-sales-date-trigger"
+              aria-label="Choose summary start date"
+              aria-expanded={openCalendar === 'from'}
+              onClick={() => setOpenCalendar(openCalendar === 'from' ? null : 'from')}
+            >
+              <CalendarDays size={14} />
+              <span>{displaySalesDate(customFrom, 'From date')}</span>
+            </button>
+
+            {openCalendar === 'from' && (
+              <div className="pos-sales-calendar-popup">
+                <DayPicker
+                  mode="single"
+                  selected={fromDate}
+                  defaultMonth={fromDate || toDate || new Date()}
+                  disabled={toDate ? { after: toDate } : undefined}
+                  onSelect={chooseFromDate}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="pos-sales-date-field">
+            <button
+              type="button"
+              className="pos-sales-date-trigger"
+              aria-label="Choose summary end date"
+              aria-expanded={openCalendar === 'to'}
+              onClick={() => setOpenCalendar(openCalendar === 'to' ? null : 'to')}
+            >
+              <CalendarDays size={14} />
+              <span>{displaySalesDate(customTo, 'To date')}</span>
+            </button>
+
+            {openCalendar === 'to' && (
+              <div className="pos-sales-calendar-popup">
+                <DayPicker
+                  mode="single"
+                  selected={toDate}
+                  defaultMonth={toDate || fromDate || new Date()}
+                  disabled={fromDate ? { before: fromDate } : undefined}
+                  onSelect={chooseToDate}
+                />
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
 
 function SaleHistoryRow({ sale, currency, printing, onReprint, onOpen }: { sale: Sale; currency: string; printing: boolean; onReprint: () => void; onOpen: () => void }) {
   const itemSummary = sale.items.map((item) => `${item.name} × ${item.quantity}`).join(', ')
-  return <article className="pos-history-row pos-sale-history-row"><div><b>{sale.receiptNumber}</b><small>{sale.localPending ? 'Pending synchronization · ' : ''}{formatSaleDate(sale.createdAt)} · {sale.items.length} item line{sale.items.length === 1 ? '' : 's'}{itemSummary ? ` · ${itemSummary}` : ''}</small><strong>{moneyMinor(sale.totalMinor, sale.currency || currency)}</strong><em>{sale.payment.method} · {sale.payment.status}</em></div><button className="pos-icon-action" type="button" onClick={onReprint} disabled={printing} aria-label={`Reprint saved receipt ${sale.receiptNumber} on Bluetooth printer`}><Printer /></button><button className="pos-icon-action" type="button" onClick={onOpen} aria-label={`Open saved receipt ${sale.receiptNumber} for browser printing`}><FileDown /></button></article>
+  return <article className="pos-history-row pos-sale-history-row"><div><b>{sale.receiptNumber}</b><small>{sale.localPending ? 'Pending synchronization · ' : ''}{formatSaleDate(sale.createdAt)} · {sale.items.length} item line{sale.items.length === 1 ? '' : 's'}{itemSummary ? ` · ${itemSummary}` : ''}</small><strong>{moneyMinor(sale.totalMinor, sale.currency || currency)}</strong><em>{sale.payment.method} · {sale.payment.status}</em></div><button className="pos-icon-action" type="button" onClick={onReprint} disabled={printing} aria-label={`Reprint saved receipt ${sale.receiptNumber} on Windows printer`}><Printer /></button><button className="pos-icon-action" type="button" onClick={onOpen} aria-label={`Open saved receipt ${sale.receiptNumber} for browser printing`}><FileDown /></button></article>
 }

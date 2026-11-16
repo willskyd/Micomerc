@@ -556,3 +556,383 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
   .sync-confirm-modal .modal-actions { flex-direction: column-reverse; }
   .sync-confirm-modal .modal-actions button { width: 100%; }
 }
+
+/* Micomerc receipt date picker */
+.pos-sales-date-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.pos-sales-date-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 33px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pos-sales-date-trigger:hover {
+  border-color: var(--green);
+}
+
+.pos-sales-calendar-popup {
+  position: relative;
+  z-index: 150;
+  width: 230px;
+  max-width: min(90vw, 280px);
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.pos-sales-calendar-popup .rdp-root {
+  width: 100%;
+  margin: 0;
+  --rdp-accent-color: var(--green);
+  --rdp-accent-background-color: var(--soft);
+  --rdp-day-height: 24px;
+  --rdp-day-width: 24px;
+  --rdp-day_button-height: 22px;
+  --rdp-day_button-width: 22px;
+  --rdp-nav_button-height: 22px;
+  --rdp-nav_button-width: 22px;
+}
+
+.pos-sales-calendar-popup .rdp-months,
+.pos-sales-calendar-popup .rdp-month {
+  width: 100%;
+  min-width: 0;
+}
+
+.pos-sales-calendar-popup .rdp-month_grid {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.pos-sales-calendar-popup .rdp-weekday,
+.pos-sales-calendar-popup .rdp-day {
+  width: 14.285%;
+  min-width: 0;
+  padding: 0;
+  text-align: center;
+}
+
+.pos-sales-calendar-popup .rdp-day_button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--fg);
+  font-size: 9px;
+}
+
+.pos-sales-calendar-popup .rdp-selected .rdp-day_button {
+  background: var(--green);
+  color: white;
+}
+
+.pos-sales-calendar-popup .rdp-today:not(.rdp-selected) .rdp-day_button {
+  border: 1px solid var(--green);
+}
+
+.pos-sales-calendar-popup .rdp-disabled .rdp-day_button {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.pos-sales-calendar-popup .rdp-chevron {
+  fill: var(--fg);
+}
+
+@media(max-width:420px) {
+  .pos-sales-calendar-popup {
+    width: min(230px, calc(100vw - 36px));
+  }
+}
+
+
+/* Micomerc receipt calendar popup */
+.pos-sales-date-field {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.pos-sales-date-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  min-height: 34px;
+  max-width: 180px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pos-sales-date-trigger svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.pos-sales-calendar-popup {
+  position: absolute;
+  z-index: 150;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 270px;
+  max-width: calc(100vw - 36px);
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.22);
+}
+
+.pos-sales-calendar-popup .rdp-root {
+  width: 100%;
+  --rdp-accent-color: var(--green);
+  --rdp-accent-background-color: var(--soft);
+  --rdp-day-height: 34px;
+  --rdp-day-width: 34px;
+  --rdp-day_button-height: 30px;
+  --rdp-day_button-width: 30px;
+  --rdp-nav_button-height: 28px;
+  --rdp-nav_button-width: 28px;
+  font-size: 12px;
+}
+
+.pos-sales-calendar-popup .rdp-months,
+.pos-sales-calendar-popup .rdp-month {
+  width: 100%;
+}
+
+.pos-sales-calendar-popup .rdp-month_caption {
+  justify-content: center;
+  min-height: 32px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pos-sales-calendar-popup .rdp-weekday {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.pos-sales-calendar-popup .rdp-day_button {
+  border-radius: 7px;
+  color: var(--fg);
+  font-size: 11px;
+}
+
+.pos-sales-calendar-popup .rdp-selected .rdp-day_button {
+  background: var(--green);
+  color: white;
+}
+
+.pos-sales-calendar-popup .rdp-disabled .rdp-day_button {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .pos-sales-filters {
+    gap: 7px;
+  }
+
+  .pos-sales-date-trigger {
+    max-width: 145px;
+    padding: 7px;
+    font-size: 10px;
+  }
+
+  .pos-sales-calendar-popup {
+    left: auto;
+    right: 0;
+  }
+}
+
+
+/* Micomerc compact contained calendar fix */
+.pos-sales-filters {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.pos-sales-date-field {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.pos-sales-calendar-popup {
+  position: relative;
+  inset: auto;
+  width: min(205px, 100%);
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-top: 5px;
+  padding: 5px;
+  overflow: hidden;
+}
+
+.pos-sales-calendar-popup .rdp-root {
+  width: 100%;
+  max-width: 100%;
+  --rdp-day-height: 22px;
+  --rdp-day-width: 22px;
+  --rdp-day_button-height: 20px;
+  --rdp-day_button-width: 20px;
+  --rdp-nav_button-height: 20px;
+  --rdp-nav_button-width: 20px;
+  font-size: 10px;
+}
+
+.pos-sales-calendar-popup .rdp-months,
+.pos-sales-calendar-popup .rdp-month,
+.pos-sales-calendar-popup .rdp-month_grid {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.pos-sales-calendar-popup .rdp-day_button {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+
+@media (max-width: 480px) {
+  .pos-sales-calendar-popup {
+    width: min(205px, 100%);
+    max-width: 100%;
+  }
+}
+
+/* Micomerc: reduce calendar size only; preserve From/To layout */
+.pos-sales-date-field {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: none;
+  align-items: flex-start;
+}
+
+.pos-sales-calendar-popup {
+  width: 195px;
+  max-width: min(195px, calc(100vw - 40px));
+  padding: 5px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.pos-sales-calendar-popup .rdp-root {
+  width: 100%;
+  --rdp-day-height: 23px;
+  --rdp-day-width: 23px;
+  --rdp-day_button-height: 21px;
+  --rdp-day_button-width: 21px;
+  --rdp-nav_button-height: 21px;
+  --rdp-nav_button-width: 21px;
+  font-size: 10px;
+}
+
+.pos-sales-calendar-popup .rdp-day_button {
+  width: 21px;
+  height: 21px;
+  font-size: 9px;
+}
+
+.pos-sales-calendar-popup .rdp-months,
+.pos-sales-calendar-popup .rdp-month,
+.pos-sales-calendar-popup .rdp-month_grid {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Keep Today reset below the open To calendar */
+.pos-sales-filters:has(.pos-sales-date-field:nth-of-type(2) .pos-sales-calendar-popup) {
+  align-items: flex-start;
+}
+
+.pos-sales-filters:has(.pos-sales-date-field:nth-of-type(2) .pos-sales-calendar-popup) .pos-reset-date {
+  flex-basis: 100%;
+  width: fit-content;
+  margin-top: 2px;
+}
+
+/* Preserve the original compact Today button size */
+.pos-sales-filters .pos-reset-date {
+  display: inline-flex;
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: max-content;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 9px;
+  font-size: 10px;
+  line-height: normal;
+  white-space: nowrap;
+}
+/* Today stays below the calendar at its original compact size */
+.pos-sales-filters:has(.pos-sales-date-field:nth-of-type(2) .pos-sales-calendar-popup) .pos-reset-date {
+  order: 10;
+  flex: 0 0 auto !important;
+  width: auto !important;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 7px 9px;
+}
+/* Small gap between receipt calendar and Today button */
+.pos-sales-date-field .pos-reset-date {
+  margin-top: 5px;
+}
+/* Micomerc: Today placement for receipt date filters */
+.pos-sales-today-below {
+  flex: 0 0 100%;
+  display: flex;
+  justify-content: flex-start;
+  margin-top: -5px;
+  margin-left: 0;
+}
+
+.pos-sales-today-below .pos-reset-date {
+  margin-top: 0;
+  flex: 0 0 auto;
+  width: auto;
+  padding: 7px 9px;
+}
