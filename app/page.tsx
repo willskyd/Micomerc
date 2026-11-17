@@ -2132,7 +2132,7 @@ function DebtComposer({ onClose, onSubmit }: {
 function RecordModal({ type, onClose, onSubmit }: { type: 'product' | 'debt' | 'receipt' | 'login' | 'detail'; onClose: () => void; onSubmit: (e: React.FormEvent<HTMLFormElement>) => void }) {
   if (type === 'debt') return <DebtComposer onClose={onClose} onSubmit={onSubmit} />
   return <div className="modal-backdrop" onMouseDown={(e) => e.currentTarget === e.target && onClose()}>
-    <div className="modal">
+    <div className={`modal${type === 'product' ? ' product-create-modal' : ''}`}>
       <div className="modal-header"><div><div className="eyebrow">Workspace action</div><h2>{type === 'product' ? 'Add new product' : type === 'receipt' ? 'Record stock receipt' : 'Workspace action'}</h2></div><button className="icon-button" onClick={onClose}><X /></button></div>
       <form onSubmit={onSubmit}>
         <label>Name or reference<input name="name" required placeholder="Product or receipt name" /></label>

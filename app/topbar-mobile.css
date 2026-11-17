@@ -31,3 +31,10 @@
   .sidebar.sidebar-collapsed .nav-item .nav-label-text{display:none}
   .sidebar.sidebar-collapsed .nav-item .nav-count{display:none}
 }
+
+/* Prevent the closed mobile sidebar from extending page width */
+@media (max-width: 768px) {
+  .sidebar.sidebar-collapsed {
+    display: none;
+  }
+}

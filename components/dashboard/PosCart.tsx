@@ -1151,7 +1151,7 @@ export function PosCart({
             <div className="pos-panel-heading"><div><h3>Cart items</h3><span>{itemCount} item{itemCount === 1 ? '' : 's'}</span></div></div>
             {cart.length === 0 ? <div className="pos-empty"><ShoppingCart /><b>Your cart is empty</b><span>Scan or search for an inventory product to get started.</span></div> : <>
               <div className="pos-table-wrap"><table className="pos-table">
-                <thead><tr><th>Product</th><th>Unit price</th><th>Quantity</th><th>Line total</th><th><span className="pos-visually-hidden">Actions</span></th></tr></thead>
+                <thead><tr><th>Product</th><th>Unit price</th><th>Quantity</th><th>Line total</th><th aria-label="Actions"></th></tr></thead>
                 <tbody>{cart.map(({ product, quantity, unitPriceMinor }) => <tr key={product.id}>
                   <td><b>{product.name}</b><small>{product.sku || product.model}{product.barcode ? ` · ${product.barcode}` : ''}</small></td>
                   <td><div className="pos-unit-price">
