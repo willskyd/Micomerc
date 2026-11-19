@@ -92,6 +92,10 @@ export default function Page() {
   const [overviewSalesMinor, setOverviewSalesMinor] = useState<number | null>(null)
   const [receipts, setReceipts] = useState<Receipt[]>([])
   const [deleteProduct, setDeleteProduct] = useState<Product | null>(null)
+  const [productSaving, setProductSaving] = useState(false)
+  const productSaveLock = useRef(false)
+  const [deletingProductId, setDeletingProductId] = useState<number | null>(null)
+  const productDeleteLock = useRef(false)
   const [deleteReceipt, setDeleteReceipt] = useState<Receipt | null>(null)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
@@ -102,6 +106,12 @@ export default function Page() {
   const [modal, setModal] = useState<'product' | 'debt' | 'receipt' | 'detail' | 'login' | null>(null)
   const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null)
   const [toast, setToast] = useState('')
+
+  useEffect(() => {
+    if (!toast) return
+    const timeout = window.setTimeout(() => setToast(''), 5000)
+    return () => window.clearTimeout(timeout)
+  }, [toast])
   const [menuOpen, setMenuOpen] = useState(false)
   const [notifications, setNotifications] = useState(false)
   const [signedIn, setSignedIn] = useState(false)
@@ -329,7 +339,6 @@ const notify = async (
     setToast(error instanceof Error ? `Activity was not saved: ${error.message}` : 'Activity was not saved')
   }
 
-  window.setTimeout(() => setToast(''), 2600)
 }
 
 
@@ -521,6 +530,7 @@ const formatCurrency = (amount: number) => {
 
   const addProduct = async (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault()
+  if (productSaveLock.current) return
 
   const f = new FormData(e.currentTarget)
   const stock = Number(f.get('stock'))
@@ -546,6 +556,9 @@ const formatCurrency = (amount: number) => {
     setToast('That barcode is already assigned to another product')
     return
   }
+  productSaveLock.current = true
+  setProductSaving(true)
+
   const operationId = crypto.randomUUID()
   const id = Date.now() * 1000 + Math.floor(Math.random() * 1000)
   const newProduct: Product = {
@@ -623,6 +636,9 @@ const formatCurrency = (amount: number) => {
   catch (error) {
     console.error(error)
     setToast(error instanceof Error ? error.message : 'Failed to add product')
+  } finally {
+    productSaveLock.current = false
+    setProductSaving(false)
   }
 }
 
@@ -1168,6 +1184,7 @@ const formatCurrency = (amount: number) => {
                ? addDebt
           : addReceipt
            }
+           saving={modal === 'product' && productSaving}
           />
         )}
 
@@ -1245,11 +1262,13 @@ const formatCurrency = (amount: number) => {
                 <p>Are you sure you want to remove <b>{deleteProduct.name}</b> from your inventory? This action cannot be undone.</p>
               </div>
               <div className="confirm-actions">
-                <button className="secondary-button" onClick={() => setDeleteProduct(null)}>Cancel</button>
-                <button className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-700" 
+                <button className="secondary-button" disabled={deletingProductId === deleteProduct.id} onClick={() => setDeleteProduct(null)}>Cancel</button>
+                <button className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-700" disabled={deletingProductId === deleteProduct.id} 
                 onClick={async () => {
-                  if (deleteProduct) {
+                  if (deleteProduct && !productDeleteLock.current) {
                     const target = deleteProduct
+                    productDeleteLock.current = true
+                    setDeletingProductId(target.id)
                     try {
                     const operationId = crypto.randomUUID()
                     const payload = { id: target.id, operationId }
@@ -1299,9 +1318,12 @@ const formatCurrency = (amount: number) => {
                } catch (error) {
                console.error(error)
              setToast(error instanceof Error ? error.message : 'Failed to delete product')
+             } finally {
+               productDeleteLock.current = false
+               setDeletingProductId(null)
              }
             }
-                   }}>Delete stock</button>
+                   }}>{deletingProductId === deleteProduct.id ? 'Deleting...' : 'Delete stock'}</button>
               </div>
             </section>
           </div>
@@ -2129,11 +2151,11 @@ function DebtComposer({ onClose, onSubmit }: {
   </div>
 }
 
-function RecordModal({ type, onClose, onSubmit }: { type: 'product' | 'debt' | 'receipt' | 'login' | 'detail'; onClose: () => void; onSubmit: (e: React.FormEvent<HTMLFormElement>) => void }) {
+function RecordModal({ type, onClose, onSubmit, saving = false }: { type: 'product' | 'debt' | 'receipt' | 'login' | 'detail'; onClose: () => void; onSubmit: (e: React.FormEvent<HTMLFormElement>) => void; saving?: boolean }) {
   if (type === 'debt') return <DebtComposer onClose={onClose} onSubmit={onSubmit} />
-  return <div className="modal-backdrop" onMouseDown={(e) => e.currentTarget === e.target && onClose()}>
+  return <div className="modal-backdrop" onMouseDown={(e) => !saving && e.currentTarget === e.target && onClose()}>
     <div className={`modal${type === 'product' ? ' product-create-modal' : ''}`}>
-      <div className="modal-header"><div><div className="eyebrow">Workspace action</div><h2>{type === 'product' ? 'Add new product' : type === 'receipt' ? 'Record stock receipt' : 'Workspace action'}</h2></div><button className="icon-button" onClick={onClose}><X /></button></div>
+      <div className="modal-header"><div><div className="eyebrow">Workspace action</div><h2>{type === 'product' ? 'Add new product' : type === 'receipt' ? 'Record stock receipt' : 'Workspace action'}</h2></div><button className="icon-button" disabled={saving} onClick={onClose}><X /></button></div>
       <form onSubmit={onSubmit}>
         <label>Name or reference<input name="name" required placeholder="Product or receipt name" /></label>
         {type === 'product' && <div className="form-row">
@@ -2145,7 +2167,7 @@ function RecordModal({ type, onClose, onSubmit }: { type: 'product' | 'debt' | '
           <label>Quantity<input name="stock" type="number" min="0" required /></label>
         </div>}
         {type === 'receipt' && <><label>Model number<input name="model" required placeholder="Model number" /></label><div className="form-row"><label>Quantity<input name="quantity" type="number" min="0" required /></label><label>Invoice<input name="invoice" required placeholder="Invoice number" /></label></div></>}
-        <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit"><Check />Save record</button></div>
+        <div className="modal-actions"><button type="button" className="secondary-button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={saving}><Check />{saving ? "Saving..." : "Save record"}</button></div>
       </form>
     </div>
   </div>
